@@ -16,55 +16,58 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-#include "abstractbox.h"
+#include "boxes/abstractbox.h"
 
-class BackgroundInner : public QWidget, public RPCSender {
-	Q_OBJECT
+namespace Ui {
+class RoundCheckbox;
+} // namespace Ui
 
+class BackgroundBox : public BoxContent {
 public:
+	BackgroundBox(QWidget*);
 
-	BackgroundInner();
-
-	void paintEvent(QPaintEvent *e);
-	void mouseMoveEvent(QMouseEvent *e);
-	void mousePressEvent(QMouseEvent *e);
-	void mouseReleaseEvent(QMouseEvent *e);
-	void resizeEvent(QResizeEvent *e);
-
-	~BackgroundInner();
-
-signals:
-
-	void backgroundChosen(int index);
+protected:
+	void prepare() override;
 
 private:
+	void backgroundChosen(int index);
 
-	void gotWallpapers(const MTPVector<MTPWallPaper> &result);
-	void updateWallpapers();
-
-	int32 _bgCount, _rows;
-	int32 _over, _overDown;
+	class Inner;
+	QPointer<Inner> _inner;
 
 };
 
-class BackgroundBox : public ItemListBox {
-	Q_OBJECT
-
+// This class is hold in header because it requires Qt preprocessing.
+class BackgroundBox::Inner : public TWidget, public RPCSender, private base::Subscriber {
 public:
+	Inner(QWidget *parent);
 
-	BackgroundBox();
-	void paintEvent(QPaintEvent *e);
+	void setBackgroundChosenCallback(base::lambda<void(int index)> &&callback) {
+		_backgroundChosenCallback = std_::move(callback);
+	}
 
-public slots:
+	~Inner();
 
-	void onBackgroundChosen(int index);
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
+	void gotWallpapers(const MTPVector<MTPWallPaper> &result);
+	void updateWallpapers();
 
-	BackgroundInner _inner;
+	base::lambda<void(int index)> _backgroundChosenCallback;
+
+	int _bgCount = 0;
+	int _rows = 0;
+	int _over = -1;
+	int _overDown = -1;
+	std_::unique_ptr<Ui::RoundCheckbox> _check; // this is not a widget
 
 };

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -71,6 +71,8 @@ LogStream operator<<(LogStream &&stream, T &&value) {
 // Outputs file name, line number and error code to std::err. Usage:
 // logError(kErrorFileTooLarge, filepath) << "file too large, size=" << size;
 LogStream logError(int code, const QString &filepath, int line = 0);
+
+void logSetWorkingPath(const QString &workingpath);
 
 static constexpr int kErrorInternal = 666;
 

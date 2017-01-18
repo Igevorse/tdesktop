@@ -16,13 +16,12 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 class RPCError {
 public:
-
 	RPCError(const MTPrpcError &error) : _code(error.c_rpc_error().verror_code.v) {
 		QString text = qs(error.c_rpc_error().verror_message);
 		if (_code < 0 || _code >= 500) {
@@ -827,3 +826,176 @@ protected:
 
 typedef void (*MTPStateChangedHandler)(int32 dcId, int32 state);
 typedef void(*MTPSessionResetHandler)(int32 dcId);
+
+template <typename Base, typename FunctionType>
+class RPCHandlerImplementation : public Base {
+protected:
+	using Lambda = base::lambda<FunctionType>;
+	using Parent = RPCHandlerImplementation<Base, FunctionType>;
+
+public:
+	RPCHandlerImplementation(Lambda &&handler) : _handler(std_::move(handler)) {
+	}
+
+protected:
+	Lambda _handler;
+
+};
+
+template <typename FunctionType>
+using RPCDoneHandlerImplementation = RPCHandlerImplementation<RPCAbstractDoneHandler, FunctionType>;
+
+template <typename R>
+class RPCDoneHandlerImplementationBare : public RPCDoneHandlerImplementation<R(const mtpPrime*, const mtpPrime*)> { // done(from, end)
+public:
+	using RPCDoneHandlerImplementation<R(const mtpPrime*, const mtpPrime*)>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler(from, end) : void(0);
+	}
+
+};
+
+template <typename R>
+class RPCDoneHandlerImplementationBareReq : public RPCDoneHandlerImplementation<R(const mtpPrime*, const mtpPrime*, mtpRequestId)> { // done(from, end, req_id)
+public:
+	using RPCDoneHandlerImplementation<R(const mtpPrime*, const mtpPrime*, mtpRequestId)>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler(from, end, requestId) : void(0);
+	}
+
+};
+
+template <typename R, typename T>
+class RPCDoneHandlerImplementationPlain : public RPCDoneHandlerImplementation<R(const T&)> { // done(result)
+public:
+	using RPCDoneHandlerImplementation<R(const T&)>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler(T(from, end)) : void(0);
+	}
+
+};
+
+template <typename R, typename T>
+class RPCDoneHandlerImplementationReq : public RPCDoneHandlerImplementation<R(const T&, mtpRequestId)> { // done(result, req_id)
+public:
+	using RPCDoneHandlerImplementation<R(const T&, mtpRequestId)>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler(T(from, end), requestId) : void(0);
+	}
+
+};
+
+template <typename R>
+class RPCDoneHandlerImplementationNo : public RPCDoneHandlerImplementation<R()> { // done()
+public:
+	using RPCDoneHandlerImplementation<R()>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler() : void(0);
+	}
+
+};
+
+template <typename R>
+class RPCDoneHandlerImplementationNoReq : public RPCDoneHandlerImplementation<R(mtpRequestId)> { // done(req_id)
+public:
+	using RPCDoneHandlerImplementation<R(mtpRequestId)>::Parent::Parent;
+	void operator()(mtpRequestId requestId, const mtpPrime *from, const mtpPrime *end) const override {
+		return this->_handler ? this->_handler(requestId) : void(0);
+	}
+
+};
+
+template <typename R>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R(const mtpPrime*, const mtpPrime*)> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationBare<R>(std_::move(lambda)));
+}
+
+template <typename R>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R(const mtpPrime*, const mtpPrime*, mtpRequestId)> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationBareReq<R>(std_::move(lambda)));
+}
+
+template <typename R, typename T>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R(const T&)> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationPlain<R, T>(std_::move(lambda)));
+}
+
+template <typename R, typename T>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R(const T&, mtpRequestId)> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationReq<R, T>(std_::move(lambda)));
+}
+
+template <typename R>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R()> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationNo<R>(std_::move(lambda)));
+}
+
+template <typename R>
+inline RPCDoneHandlerPtr rpcDone_lambda_wrap_helper(base::lambda<R(mtpRequestId)> &&lambda) {
+	return RPCDoneHandlerPtr(new RPCDoneHandlerImplementationNoReq<R>(std_::move(lambda)));
+}
+
+template <typename Lambda, typename = std_::enable_if_t<std_::is_rvalue_reference<Lambda&&>::value>>
+RPCDoneHandlerPtr rpcDone(Lambda &&lambda) {
+	return rpcDone_lambda_wrap_helper(base::lambda_type<Lambda>(std_::move(lambda)));
+}
+
+template <typename FunctionType>
+using RPCFailHandlerImplementation = RPCHandlerImplementation<RPCAbstractFailHandler, FunctionType>;
+
+class RPCFailHandlerImplementationPlain : public RPCFailHandlerImplementation<bool(const RPCError&)> { // fail(error)
+public:
+	using Parent::Parent;
+	bool operator()(mtpRequestId requestId, const RPCError &error) const override {
+		return _handler ? _handler(error) : true;
+	}
+
+};
+
+class RPCFailHandlerImplementationReq : public RPCFailHandlerImplementation<bool(const RPCError&, mtpRequestId)> { // fail(error, req_id)
+public:
+	using Parent::Parent;
+	bool operator()(mtpRequestId requestId, const RPCError &error) const override {
+		return this->_handler ? this->_handler(error, requestId) : true;
+	}
+
+};
+
+class RPCFailHandlerImplementationNo : public RPCFailHandlerImplementation<bool()> { // fail()
+public:
+	using Parent::Parent;
+	bool operator()(mtpRequestId requestId, const RPCError &error) const override {
+		return this->_handler ? this->_handler() : true;
+	}
+
+};
+
+class RPCFailHandlerImplementationNoReq : public RPCFailHandlerImplementation<bool(mtpRequestId)> { // fail(req_id)
+public:
+	using Parent::Parent;
+	bool operator()(mtpRequestId requestId, const RPCError &error) const override {
+		return this->_handler ? this->_handler(requestId) : true;
+	}
+
+};
+
+inline RPCFailHandlerPtr rpcFail_lambda_wrap_helper(base::lambda<bool(const RPCError&)> &&lambda) {
+	return RPCFailHandlerPtr(new RPCFailHandlerImplementationPlain(std_::move(lambda)));
+}
+
+inline RPCFailHandlerPtr rpcFail_lambda_wrap_helper(base::lambda<bool(const RPCError&, mtpRequestId)> &&lambda) {
+	return RPCFailHandlerPtr(new RPCFailHandlerImplementationReq(std_::move(lambda)));
+}
+
+inline RPCFailHandlerPtr rpcFail_lambda_wrap_helper(base::lambda<bool()> &&lambda) {
+	return RPCFailHandlerPtr(new RPCFailHandlerImplementationNo(std_::move(lambda)));
+}
+
+inline RPCFailHandlerPtr rpcFail_lambda_wrap_helper(base::lambda<bool(mtpRequestId)> &&lambda) {
+	return RPCFailHandlerPtr(new RPCFailHandlerImplementationNoReq(std_::move(lambda)));
+}
+
+template <typename Lambda, typename = std_::enable_if_t<std_::is_rvalue_reference<Lambda&&>::value>>
+RPCFailHandlerPtr rpcFail(Lambda &&lambda) {
+	return rpcFail_lambda_wrap_helper(base::lambda_type<Lambda>(std_::move(lambda)));
+}

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "inline_bots/inline_bot_send_data.h"
@@ -88,6 +88,12 @@ void SendFile::addToHistory(const Result *owner, History *history,
 MTPDmessage::Flags flags, MsgId msgId, UserId fromId, MTPint mtpDate,
 UserId viaBotId, MsgId replyToId, const MTPReplyMarkup &markup) const {
 	history->addNewDocument(msgId, flags, viaBotId, replyToId, date(mtpDate), fromId, _document, _caption, markup);
+}
+
+void SendGame::addToHistory(const Result *owner, History *history,
+	MTPDmessage::Flags flags, MsgId msgId, UserId fromId, MTPint mtpDate,
+	UserId viaBotId, MsgId replyToId, const MTPReplyMarkup &markup) const {
+	history->addNewGame(msgId, flags, viaBotId, replyToId, date(mtpDate), fromId, _game, markup);
 }
 
 } // namespace internal

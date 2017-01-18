@@ -2,6 +2,7 @@
 
 This is the complete source code and the build instructions for the alpha version of the official desktop client for the [Telegram][telegram] messenger, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
 
+[![GitHub version](https://badge.fury.io/gh/telegramdesktop%2Ftdesktop.svg)](https://badge.fury.io/gh/telegramdesktop%2Ftdesktop)
 [![Build Status](https://travis-ci.org/telegramdesktop/tdesktop.svg?branch=master)](https://travis-ci.org/telegramdesktop/tdesktop)
 
 The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
@@ -12,11 +13,11 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * Mac OS X 10.8 - Mac OS X 10.11
 * Mac OS X 10.6 - Mac OS X 10.7 (separate build)
 * Ubuntu 12.04 - Ubuntu 16.04
-* Fedora 22
+* Fedora 22 - Fedora 24
 
-## Third-party libraries
+## Third-party
 
-* Qt 5.3.2 and 5.6.0, slightly patched ([LGPL](http://doc.qt.io/qt-5/lgpl.html))
+* Qt 5.3.2 and 5.6.2, slightly patched ([LGPL](http://doc.qt.io/qt-5/lgpl.html))
 * OpenSSL 1.0.1g ([OpenSSL License](https://www.openssl.org/source/license.html))
 * zlib 1.2.8 ([zlib License](http://www.zlib.net/zlib_license.html))
 * libexif 0.6.20 ([LGPL](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html))
@@ -24,6 +25,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 * liblzma ([public domain](http://tukaani.org/xz/))
 * Google Breakpad ([License](https://chromium.googlesource.com/breakpad/breakpad/+/master/LICENSE))
 * Google Crashpad ([Apache License 2.0](https://chromium.googlesource.com/crashpad/crashpad/+/master/LICENSE))
+* GYP ([BSD license](https://github.com/bnoordhuis/gyp/blob/master/LICENSE))
+* Ninja ([Apache License 2.0](https://github.com/ninja-build/ninja/blob/master/COPYING))
 * OpenAL Soft ([LGPL](http://kcat.strangesoft.net/openal.html))
 * Opus codec ([BSD license](http://www.opus-codec.org/license/))
 * FFmpeg ([LGPL](https://www.ffmpeg.org/legal.html))
@@ -32,10 +35,8 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 ## Build instructions
 
 * [Visual Studio 2015][msvc]
-* [Xcode 7][xcode]
-* [Xcode 7 for OS X 10.6 and 10.7][xcode_old]
-* [Qt Creator 3.5.1 Ubuntu][qtcreator]
-* [Using qmake on GNU/Linux][qmake]
+* [Xcode 8][xcode]
+* [GYP/CMake on GNU/Linux][cmake]
 
 ## Projects in Telegram solution
 
@@ -81,5 +82,4 @@ The source code is published under GPLv3 with OpenSSL exception, the license is 
 [msvc]: doc/building-msvc.md
 [xcode]: doc/building-xcode.md
 [xcode_old]: doc/building-xcode-old.md
-[qtcreator]: doc/building-qtcreator.md
-[qmake]: doc/building-qmake.md
+[cmake]: doc/building-cmake.md

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "inline_bots/inline_bot_layout_item.h"
@@ -113,6 +113,7 @@ std_::unique_ptr<ItemBase> ItemBase::createLayout(Result *result, bool forceThum
 	case Type::Article:
 	case Type::Geo:
 	case Type::Venue: return std_::make_unique<internal::Article>(result, forceThumb); break;
+	case Type::Game: return std_::make_unique<internal::Game>(result); break;
 	case Type::Contact: return std_::make_unique<internal::Contact>(result); break;
 	}
 	return std_::unique_ptr<ItemBase>();
@@ -145,7 +146,11 @@ ImagePtr ItemBase::getResultThumb() const {
 
 QPixmap ItemBase::getResultContactAvatar(int width, int height) const {
 	if (_result->_type == Result::Type::Contact) {
-		return userDefPhoto(qHash(_result->_id) % UserColorsCount)->pixCircled(width, height);
+		auto result = EmptyUserpic(qHash(_result->_id) % kUserColorsCount, _result->getLayoutTitle()).generate(width);
+		if (result.height() != height * cIntRetinaFactor()) {
+			result = result.scaled(QSize(width, height) * cIntRetinaFactor(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		}
+		return std_::move(result);
 	}
 	return QPixmap();
 }
@@ -173,9 +178,13 @@ ClickHandlerPtr ItemBase::getResultContentUrlHandler() const {
 }
 
 QString ItemBase::getResultThumbLetter() const {
-	QVector<QStringRef> parts = _result->_url.splitRef('/');
+#ifndef OS_MAC_OLD
+	auto parts = _result->_url.splitRef('/');
+#else // OS_MAC_OLD
+	auto parts = _result->_url.split('/');
+#endif // OS_MAC_OLD
 	if (!parts.isEmpty()) {
-		QStringRef domain = parts.at(0);
+		auto domain = parts.at(0);
 		if (parts.size() > 2 && domain.endsWith(':') && parts.at(1).isEmpty()) { // http:// and others
 			domain = parts.at(2);
 		}
@@ -204,7 +213,7 @@ const DocumentItems *documentItems() {
 namespace internal {
 
 void regDocumentItem(DocumentData *document, ItemBase *item) {
-	documentItemsMap.makeIfNull();
+	documentItemsMap.createIfNull();
 	(*documentItemsMap)[document].insert(item);
 }
 

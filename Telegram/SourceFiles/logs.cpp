@@ -16,13 +16,14 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
-
 #include "logs.h"
 
 #include <signal.h>
+#include <new>
+
 #include "pspecific.h"
 
 #ifndef TDESKTOP_DISABLE_CRASH_REPORTS
@@ -591,8 +592,8 @@ void _moveOldDataFiles(const QString &wasDir) {
 					}
 					if (!tdataConfig.exists() || tdataConfig.remove()) {
 						LOG(("Removed 'tdata/config'"));
-						LOG(("Could not remove 'tdata/config'"));
 					} else {
+						LOG(("Could not remove 'tdata/config'"));
 					}
 					QDir().rmdir(wasDir + "tdata");
 				}
@@ -735,6 +736,22 @@ namespace internal {
 	}
 
 namespace internal {
+
+	struct SomeAllocatedMemoryChunk {
+		char data[1024 * 1024];
+	};
+	std_::unique_ptr<SomeAllocatedMemoryChunk> SomeAllocatedMemory;
+
+	void OperatorNewHandler() {
+		std::set_new_handler(nullptr);
+		SomeAllocatedMemory.reset();
+		t_assert(!"Could not allocate!");
+	}
+
+	void InstallOperatorNewHandler() {
+		SomeAllocatedMemory = std_::make_unique<SomeAllocatedMemoryChunk>();
+		std::set_new_handler(OperatorNewHandler);
+	}
 
 	Qt::HANDLE ReportingThreadId = nullptr;
 	bool ReportingHeaderWritten = false;
@@ -998,8 +1015,7 @@ namespace internal {
 
 #if !defined Q_OS_MAC || defined MAC_USE_BREAKPAD
 		if (internal::BreakpadExceptionHandler) {
-			google_breakpad::ExceptionHandler *h = getPointerAndReset(internal::BreakpadExceptionHandler);
-			delete h;
+			delete base::take(internal::BreakpadExceptionHandler);
 		}
 #endif // !Q_OS_MAC || MAC_USE_BREAKPAD
 
@@ -1078,6 +1094,9 @@ namespace internal {
 				signal(SIGFPE, SignalHandlers::internal::Handler);
 #endif // else for !Q_OS_WIN
 			}
+
+			SignalHandlers::internal::InstallOperatorNewHandler();
+
 			return Started;
 		}
 

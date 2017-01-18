@@ -16,24 +16,25 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "mainwindow.h"
 #include "pspecific.h"
+#include "core/single_timer.h"
 
 class UpdateChecker;
 class Application : public QApplication {
 	Q_OBJECT
 
 public:
-
 	Application(int &argc, char **argv);
+
+	bool event(QEvent *e) override;
 
 // Single instance application
 public slots:
-
 	void socketConnected();
 	void socketError(QLocalSocket::LocalSocketError e);
 	void socketDisconnected();
@@ -47,8 +48,9 @@ public slots:
 	void startApplication(); // will be done in exec()
 	void closeApplication(); // will be done in aboutToQuit()
 
-private:
+	void onMainThreadTask();
 
+private:
 	typedef QPair<QLocalSocket*, QByteArray> LocalClient;
 	typedef QList<LocalClient> LocalClients;
 
@@ -64,7 +66,6 @@ private:
 
 // Autoupdating
 public:
-
 	void startUpdateCheck(bool forceWait);
 	void stopUpdate();
 
@@ -78,7 +79,6 @@ public:
 	int32 updatingReady();
 
 signals:
-
 	void updateChecking();
 	void updateLatest();
 	void updateProgress(qint64 ready, qint64 total);
@@ -86,7 +86,6 @@ signals:
 	void updateFailed();
 
 public slots:
-
 	void updateCheck();
 
 	void updateGotCurrent();
@@ -96,14 +95,13 @@ public slots:
 	void onUpdateFailed();
 
 private:
-
 	SingleTimer _updateCheckTimer;
 	QNetworkReply *_updateReply = nullptr;
 	QNetworkAccessManager _updateManager;
 	QThread *_updateThread = nullptr;
 	UpdateChecker *_updateChecker = nullptr;
 
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 };
 
 namespace Sandbox {
@@ -133,7 +131,7 @@ namespace Sandbox {
 	void updateFailed();
 	void updateReady();
 
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
 	void connect(const char *signal, QObject *object, const char *method);
 
@@ -163,9 +161,6 @@ public:
 	bool isPhotoUpdating(const PeerId &peer);
 	void cancelPhotoUpdate(const PeerId &peer);
 
-	void mtpPause();
-	void mtpUnpause();
-
 	void selfPhotoCleared(const MTPUserProfilePhoto &result);
 	void chatPhotoCleared(PeerId peer, const MTPUpdates &updates);
 	void selfPhotoDone(const MTPphotos_Photo &result);
@@ -173,7 +168,7 @@ public:
 	bool peerPhotoFail(PeerId peerId, const RPCError &e);
 	void peerClearPhoto(PeerId peer);
 
-	void writeUserConfigIn(uint64 ms);
+	void writeUserConfigIn(TimeMs ms);
 
 	void killDownloadSessionsStart(int32 dc);
 	void killDownloadSessionsStop(int32 dc);
@@ -189,9 +184,6 @@ signals:
 	void adjustSingleTimers();
 
 public slots:
-
-	void doMtpUnpause();
-
 	void photoUpdated(const FullMsgId &msgId, bool silent, const MTPInputFile &file);
 
 	void onSwitchDebugMode();
@@ -205,20 +197,20 @@ public slots:
 	void call_handleUnreadCounterUpdate();
 	void call_handleFileDialogQueue();
 	void call_handleDelayedPeerUpdates();
+	void call_handleObservables();
 
 private:
+	void loadLanguage();
 
 	QMap<FullMsgId, PeerId> photoUpdates;
 
-	QMap<int32, uint64> killDownloadSessionTimes;
+	QMap<int32, TimeMs> killDownloadSessionTimes;
 	SingleTimer killDownloadSessionsTimer;
 
-	uint64 _lastActionTime;
+	TimeMs _lastActionTime = 0;
 
-	MainWindow *_window;
-	FileUploader *_uploader;
-	Translator *_translator;
-
-	SingleTimer _mtpUnpauseTimer;
+	MainWindow *_window = nullptr;
+	FileUploader *_uploader = nullptr;
+	Translator *_translator = nullptr;
 
 };

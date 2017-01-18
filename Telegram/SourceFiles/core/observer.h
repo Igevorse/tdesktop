@@ -16,227 +16,383 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "core/vector_of_moveable.h"
+#include "core/type_traits.h"
 
-namespace Notify {
-
-using ConnectionId = uint32;
-
-// startObservers() must be called after main() started (not in a global variable constructor).
-// finishObservers() must be called before main() finished (not in a global variable destructor).
-void startObservers();
-void finishObservers();
-
-using StartObservedEventCallback = void(*)();
-using FinishObservedEventCallback = void(*)();
-
+namespace base {
 namespace internal {
 
-using ObservedEvent = uchar;
-using StartCallback = void(*)(void*);
-using FinishCallback = void(*)(void*);
-using UnregisterCallback = void(*)(void*,int connectionIndex);
+using ObservableCallHandlers = base::lambda<void()>;
+void RegisterPendingObservable(ObservableCallHandlers *handlers);
+void UnregisterActiveObservable(ObservableCallHandlers *handlers);
+void UnregisterObservable(ObservableCallHandlers *handlers);
 
-class BaseObservedEventRegistrator {
+template <typename EventType>
+using EventParamType = typename base::type_traits<EventType>::parameter_type;
+
+template <typename EventType>
+struct SubscriptionHandlerHelper {
+	using type = base::lambda<void(EventParamType<EventType>)>;
+};
+
+template <>
+struct SubscriptionHandlerHelper<void> {
+	using type = base::lambda<void()>;
+};
+
+template <typename EventType>
+using SubscriptionHandler = typename SubscriptionHandlerHelper<EventType>::type;
+
+// Required because QShared/WeakPointer can't point to void.
+class BaseObservableData {
+};
+
+template <typename EventType, typename Handler>
+class CommonObservableData;
+
+template <typename EventType, typename Handler>
+class ObservableData;
+
+} // namespace internal
+
+class Subscription {
 public:
-	BaseObservedEventRegistrator(void *that
-		, StartCallback startCallback
-		, FinishCallback finishCallback
-		, UnregisterCallback unregisterCallback);
-
-protected:
-	inline ObservedEvent event() const {
-		return _event;
+	Subscription() = default;
+	Subscription(const Subscription &) = delete;
+	Subscription &operator=(const Subscription &) = delete;
+	Subscription(Subscription &&other) : _node(base::take(other._node)), _removeMethod(other._removeMethod) {
+	}
+	Subscription &operator=(Subscription &&other) {
+		qSwap(_node, other._node);
+		qSwap(_removeMethod, other._removeMethod);
+		return *this;
+	}
+	explicit operator bool() const {
+		return (_node != nullptr);
+	}
+	void destroy() {
+		if (_node) {
+			(*_removeMethod)(_node);
+			delete _node;
+			_node = nullptr;
+		}
+	}
+	~Subscription() {
+		destroy();
 	}
 
 private:
-	ObservedEvent _event;
+	struct Node {
+		Node(const QSharedPointer<internal::BaseObservableData> &observable) : observable(observable) {
+		}
+		Node *next = nullptr;
+		Node *prev = nullptr;
+		QWeakPointer<internal::BaseObservableData> observable;
+	};
+	using RemoveMethod = void(*)(Node*);
+	Subscription(Node *node, RemoveMethod removeMethod) : _node(node), _removeMethod(removeMethod) {
+	}
+
+	Node *_node = nullptr;
+	RemoveMethod _removeMethod;
+
+	template <typename EventType, typename Handler>
+	friend class internal::CommonObservableData;
+
+	template <typename EventType, typename Handler>
+	friend class internal::ObservableData;
 
 };
 
-// Handler is one of Function<> instantiations.
-template <typename Flags, typename Handler>
-struct ObserversList {
-	struct Entry {
-		Flags flags;
+namespace internal {
+
+template <typename EventType, typename Handler, bool EventTypeIsSimple>
+class BaseObservable;
+
+template <typename EventType, typename Handler>
+class CommonObservable {
+public:
+	Subscription add_subscription(Handler &&handler) {
+		if (!_data) {
+			_data = MakeShared<ObservableData<EventType, Handler>>(this);
+		}
+		return _data->append(std_::move(handler));
+	}
+
+private:
+	QSharedPointer<ObservableData<EventType, Handler>> _data;
+
+	friend class CommonObservableData<EventType, Handler>;
+	friend class BaseObservable<EventType, Handler, base::type_traits<EventType>::is_fast_copy_type::value>;
+
+};
+
+template <typename EventType, typename Handler>
+class BaseObservable<EventType, Handler, true> : public internal::CommonObservable<EventType, Handler> {
+public:
+	void notify(EventType event, bool sync = false) {
+		if (this->_data) {
+			this->_data->notify(std_::move(event), sync);
+		}
+	}
+
+};
+
+template <typename EventType, typename Handler>
+class BaseObservable<EventType, Handler, false> : public internal::CommonObservable<EventType, Handler> {
+public:
+	void notify(EventType &&event, bool sync = false) {
+		if (this->_data) {
+			this->_data->notify(std_::move(event), sync);
+		}
+	}
+	void notify(const EventType &event, bool sync = false) {
+		if (this->_data) {
+			this->_data->notify(EventType(event), sync);
+		}
+	}
+
+};
+
+} // namespace internal
+
+namespace internal {
+
+template <typename EventType, typename Handler>
+class CommonObservableData : public BaseObservableData {
+public:
+	CommonObservableData(CommonObservable<EventType, Handler> *observable) : _observable(observable) {
+	}
+
+	Subscription append(Handler &&handler) {
+		auto node = new Node(_observable->_data, std_::move(handler));
+		if (_begin) {
+			_end->next = node;
+			node->prev = _end;
+			_end = node;
+		} else {
+			_begin = _end = node;
+		}
+		return { _end, &CommonObservableData::destroyNode };
+	}
+
+	bool empty() const {
+		return !_begin;
+	}
+
+private:
+	struct Node : public Subscription::Node {
+		Node(const QSharedPointer<BaseObservableData> &observer, Handler &&handler) : Subscription::Node(observer), handler(std_::move(handler)) {
+		}
 		Handler handler;
 	};
-	std_::vector_of_moveable<Entry> entries;
-	QVector<int> freeIndices;
-};
 
-// If no filtering by flags is done, you can use Flags=int and this value.
-constexpr int UniversalFlag = 0x01;
-
-} // namespace internal
-
-// Objects of this class should be constructed in global scope.
-// startCallback will be called from Notify::startObservers().
-// finishCallback will be called from Notify::finishObservers().
-template <typename Flags, typename Handler>
-class ObservedEventRegistrator : public internal::BaseObservedEventRegistrator {
-public:
-	ObservedEventRegistrator(StartObservedEventCallback startCallback,
-		FinishObservedEventCallback finishCallback) : internal::BaseObservedEventRegistrator(reinterpret_cast<void*>(this),
-			ObservedEventRegistrator<Flags, Handler>::start,
-			ObservedEventRegistrator<Flags, Handler>::finish,
-			ObservedEventRegistrator<Flags, Handler>::unregister)
-		, _startCallback(startCallback), _finishCallback(finishCallback) {
-	}
-
-	bool started() const {
-		return _list != nullptr;
-	}
-
-	ConnectionId registerObserver(Flags flags, Handler &&handler) {
-		t_assert(started());
-
-		int connectionIndex = doRegisterObserver(flags, std_::forward<Handler>(handler));
-		return (static_cast<uint32>(event()) << 24) | static_cast<uint32>(connectionIndex + 1);
-	}
-
-	template <typename... Args>
-	void notify(Flags flags, Args&&... args) {
-		t_assert(started());
-
-		for (auto &entry : _list->entries) {
-			if (!entry.handler.isNull() && (flags & entry.flags)) {
-				entry.handler.call(std_::forward<Args>(args)...);
-			}
+	void remove(Subscription::Node *node) {
+		if (node->prev) {
+			node->prev->next = node->next;
+		}
+		if (node->next) {
+			node->next->prev = node->prev;
+		}
+		if (_begin == node) {
+			_begin = static_cast<Node*>(node->next);
+		}
+		if (_end == node) {
+			_end = static_cast<Node*>(node->prev);
+		}
+		if (_current == node) {
+			_current = static_cast<Node*>(node->prev);
+		} else if (!_begin) {
+			_observable->_data.reset();
 		}
 	}
 
-private:
-	using Self = ObservedEventRegistrator<Flags, Handler>;
-	static void start(void *vthat) {
-		Self *that = reinterpret_cast<Self*>(vthat);
-
-		t_assert(!that->started());
-		if (that->_startCallback) that->_startCallback();
-		that->_list = new internal::ObserversList<Flags, Handler>();
+	static void destroyNode(Subscription::Node *node) {
+		if (auto that = node->observable.toStrongRef()) {
+			static_cast<CommonObservableData*>(that.data())->remove(node);
+		}
 	}
-	static void finish(void *vthat) {
-		Self *that = reinterpret_cast<Self*>(vthat);
 
-		if (that->_finishCallback) that->_finishCallback();
-		delete that->_list;
-		that->_list = nullptr;
-	}
-	static void unregister(void *vthat, int connectionIndex) {
-		Self *that = reinterpret_cast<Self*>(vthat);
-
-		t_assert(that->started());
-
-		auto &entries(that->_list->entries);
-		if (entries.size() <= connectionIndex) return;
-
-		if (entries.size() == connectionIndex + 1) {
-			for (entries.pop_back(); !entries.isEmpty() && entries.back().handler.isNull();) {
-				entries.pop_back();
+	template <typename CallCurrent>
+	void notifyEnumerate(CallCurrent callCurrent) {
+		_current = _begin;
+		do {
+			callCurrent();
+			if (_current) {
+				_current = static_cast<Node*>(_current->next);
+			} else if (_begin) {
+				_current = _begin;
+			} else {
+				break;
 			}
+		} while (_current);
+
+		if (empty()) {
+			_observable->_data.reset();
+		}
+	}
+
+	CommonObservable<EventType, Handler> *_observable = nullptr;
+	Node *_begin = nullptr;
+	Node *_current = nullptr;
+	Node *_end = nullptr;
+	ObservableCallHandlers _callHandlers;
+
+	friend class ObservableData<EventType, Handler>;
+
+};
+
+template <typename EventType, typename Handler>
+class ObservableData : public CommonObservableData<EventType, Handler> {
+public:
+	using CommonObservableData<EventType, Handler>::CommonObservableData;
+
+	void notify(EventType &&event, bool sync) {
+		if (_handling) {
+			sync = false;
+		}
+		if (sync) {
+			_events.push_back(std_::move(event));
+			callHandlers();
 		} else {
-			entries[connectionIndex].handler = Handler();
-			that->_list->freeIndices.push_back(connectionIndex);
+			if (!this->_callHandlers) {
+				this->_callHandlers = [this]() {
+					callHandlers();
+				};
+			}
+			if (_events.empty()) {
+				RegisterPendingObservable(&this->_callHandlers);
+			}
+			_events.push_back(std_::move(event));
 		}
 	}
 
-	int doRegisterObserver(Flags flags, Handler &&handler) {
-		while (!_list->freeIndices.isEmpty()) {
-			auto freeIndex = _list->freeIndices.back();
-			_list->freeIndices.pop_back();
+	~ObservableData() {
+		UnregisterObservable(&this->_callHandlers);
+	}
 
-			if (freeIndex < _list->entries.size()) {
-				_list->entries[freeIndex] = { flags, std_::move(handler) };
-				return freeIndex;
+private:
+	void callHandlers() {
+		_handling = true;
+		auto events = base::take(_events);
+		for (auto &event : events) {
+			this->notifyEnumerate([this, &event]() {
+				this->_current->handler(event);
+			});
+		}
+		_handling = false;
+		UnregisterActiveObservable(&this->_callHandlers);
+	}
+
+	std_::vector_of_moveable<EventType> _events;
+	bool _handling = false;
+
+};
+
+template <class Handler>
+class ObservableData<void, Handler> : public CommonObservableData<void, Handler> {
+public:
+	using CommonObservableData<void, Handler>::CommonObservableData;
+
+	void notify(bool sync) {
+		if (_handling) {
+			sync = false;
+		}
+		if (sync) {
+			++_eventsCount;
+			callHandlers();
+		} else {
+			if (!this->_callHandlers) {
+				this->_callHandlers = [this]() {
+					callHandlers();
+				};
+			}
+			if (!_eventsCount) {
+				RegisterPendingObservable(&this->_callHandlers);
+			}
+			++_eventsCount;
+		}
+	}
+
+	~ObservableData() {
+		UnregisterObservable(&this->_callHandlers);
+	}
+
+private:
+	void callHandlers() {
+		_handling = true;
+		auto eventsCount = base::take(_eventsCount);
+		for (int i = 0; i != eventsCount; ++i) {
+			this->notifyEnumerate([this]() {
+				this->_current->handler();
+			});
+		}
+		_handling = false;
+		UnregisterActiveObservable(&this->_callHandlers);
+	}
+
+	int _eventsCount = 0;
+	bool _handling = false;
+
+};
+
+template <typename Handler>
+class BaseObservable<void, Handler, base::type_traits<void>::is_fast_copy_type::value> : public internal::CommonObservable<void, Handler> {
+public:
+	void notify(bool sync = false) {
+		if (this->_data) {
+			this->_data->notify(sync);
+		}
+	}
+
+};
+
+} // namespace internal
+
+template <typename EventType, typename Handler = internal::SubscriptionHandler<EventType>>
+class Observable : public internal::BaseObservable<EventType, Handler, base::type_traits<EventType>::is_fast_copy_type::value> {
+};
+
+class Subscriber {
+protected:
+	template <typename EventType, typename Handler, typename Lambda>
+	int subscribe(base::Observable<EventType, Handler> &observable, Lambda &&handler) {
+		_subscriptions.push_back(observable.add_subscription(std_::forward<Lambda>(handler)));
+		return _subscriptions.size();
+	}
+
+	template <typename EventType, typename Handler, typename Lambda>
+	int subscribe(base::Observable<EventType, Handler> *observable, Lambda &&handler) {
+		return subscribe(*observable, std_::forward<Lambda>(handler));
+	}
+
+	void unsubscribe(int index) {
+		if (!index) return;
+		t_assert(index > 0 && index <= _subscriptions.size());
+		_subscriptions[index - 1].destroy();
+		if (index == _subscriptions.size()) {
+			while (index > 0 && !_subscriptions[--index]) {
+				_subscriptions.pop_back();
 			}
 		}
-		_list->entries.push_back({ flags, std_::move(handler) });
-		return _list->entries.size() - 1;
 	}
 
-	StartObservedEventCallback _startCallback;
-	FinishObservedEventCallback _finishCallback;
-	internal::ObserversList<Flags, Handler> *_list = nullptr;
-
-};
-
-// If no filtering of notifications by Flags is intended use this class.
-template <typename Handler>
-class SimpleObservedEventRegistrator {
-public:
-	SimpleObservedEventRegistrator(StartObservedEventCallback startCallback,
-		FinishObservedEventCallback finishCallback) : _implementation(startCallback, finishCallback) {
-	}
-
-	bool started() const {
-		return _implementation.started();
-	}
-
-	ConnectionId registerObserver(Handler &&handler) {
-		return _implementation.registerObserver(internal::UniversalFlag, std_::forward<Handler>(handler));
-	}
-
-	template <typename... Args>
-	void notify(Args&&... args) {
-		return _implementation.notify(internal::UniversalFlag, std_::forward<Args>(args)...);
+	~Subscriber() {
+		auto subscriptions = base::take(_subscriptions);
+		for (auto &subscription : subscriptions) {
+			subscription.destroy();
+		}
 	}
 
 private:
-	ObservedEventRegistrator<int, Handler> _implementation;
+	std_::vector_of_moveable<base::Subscription> _subscriptions;
 
 };
 
-// Each observer type should have observerRegistered(Notify::ConnectionId connection) method.
-// Usually it is done by deriving the type from the Notify::Observer base class.
-// In destructor it should call Notify::unregisterObserver(connection) for all the connections.
+void HandleObservables();
 
-class Observer;
-namespace internal {
-void observerRegisteredDefault(Observer *observer, ConnectionId connection);
-} // namespace internal
-
-void unregisterObserver(ConnectionId connection);
-
-class Observer {
-public:
-	virtual ~Observer() = 0;
-
-private:
-	void observerRegistered(ConnectionId connection);
-	friend void internal::observerRegisteredDefault(Observer *observer, ConnectionId connection);
-
-	QVector<ConnectionId> _connections;
-
-};
-
-namespace internal {
-
-template <typename ObserverType, int>
-struct ObserverRegisteredGeneric {
-	static inline void call(ObserverType *observer, ConnectionId connection) {
-		observer->observerRegistered(connection);
-	}
-};
-
-template <typename ObserverType>
-struct ObserverRegisteredGeneric<ObserverType, true> {
-	static inline void call(ObserverType *observer, ConnectionId connection) {
-		observerRegisteredDefault(observer, connection);
-	}
-};
-
-} // namespace internal
-
-template <typename ObserverType>
-inline void observerRegistered(ObserverType *observer, ConnectionId connection) {
-	// For derivatives of the Observer class we call special friend function observerRegistered().
-	// For all other classes we call just a member function observerRegistered().
-	using ObserverRegistered = internal::ObserverRegisteredGeneric<ObserverType, std_::is_base_of<Observer, ObserverType>::value>;
-	ObserverRegistered::call(observer, connection);
-}
-
-} // namespace Notify
+} // namespace base

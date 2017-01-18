@@ -16,13 +16,18 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "window/section_widget.h"
 
+namespace Ui {
 class ScrollArea;
+class PlainShadow;
+template <typename Widget>
+class WidgetFadeWrap;
+} // namespace Ui
 
 namespace Profile {
 
@@ -40,20 +45,16 @@ public:
 		return peer();
 	}
 
-	bool hasTopBarShadow() const override {
-		return _fixedBarShadow->isFullyShown();
-	}
+	bool hasTopBarShadow() const override;
 
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params) override;
 
 	void setInnerFocus() override;
 
-	void updateAdaptiveLayout() override;
-
 	bool showInternal(const Window::SectionMemento *memento) override;
 	std_::unique_ptr<Window::SectionMemento> createMemento() const override;
 
-	void setInternalState(const SectionMemento *memento);
+	void setInternalState(const QRect &geometry, const SectionMemento *memento);
 
 protected:
 	void resizeEvent(QResizeEvent *e) override;
@@ -65,12 +66,15 @@ private slots:
 	void onScroll();
 
 private:
-	friend class SectionMemento;
+	void updateScrollState();
+	void updateAdaptiveLayout();
+	void saveState(SectionMemento *memento) const;
+	void restoreState(const SectionMemento *memento);
 
-	ChildWidget<ScrollArea> _scroll;
-	ChildWidget<InnerWidget> _inner;
-	ChildWidget<FixedBar> _fixedBar;
-	ChildWidget<ToggleableShadow> _fixedBarShadow;
+	object_ptr<Ui::ScrollArea> _scroll;
+	QPointer<InnerWidget> _inner;
+	object_ptr<FixedBar> _fixedBar;
+	object_ptr<Ui::WidgetFadeWrap<Ui::PlainShadow>> _fixedBarShadow;
 
 };
 

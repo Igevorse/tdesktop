@@ -1,10 +1,10 @@
 ##Build instructions for Xcode 7.2.1
 
+**NB** These are outdated, please refer to [Building using Xcode][xcode] instructions.
+
 ###Prepare folder
 
 Choose a folder for the future build, for example **/Users/user/TBuild** There you will have two folders, **Libraries** for third-party libs and **tdesktop** (or **tdesktop-master**) for the app.
-
-**IMPORTANT** You are required to build and install Qt 5.6.0 from the [Xcode 7](building-xcode.md) instructions first.
 
 ###Clone source code
 
@@ -12,7 +12,7 @@ By git – in Terminal go to **/Users/user/TBuild** and run
 
     git clone https://github.com/telegramdesktop/tdesktop.git
 
-or download in ZIP and extract to **/Users/user/TBuild** rename **tdesktop-master** to **tdesktop** to have **/Users/user/TBuild/tdesktop/Telegram/Telegram.xcodeproj** project, then go to **/Users/user/TBuild/tdesktop** and run
+then go to **/Users/user/TBuild/tdesktop** and run
 
     git checkout mac32
 
@@ -43,8 +43,6 @@ In Terminal go to **/Users/user/TBuild/Libraries/zlib-1.2.8** and run:
 Get sources from https://github.com/telegramdesktop/openssl-xcode, by git – in Terminal go to **/Users/user/TBuild/Libraries** and run
 
     git clone https://github.com/telegramdesktop/openssl-xcode.git
-
-or download in ZIP and extract to **/Users/user/TBuild/Libraries**, rename **openssl-xcode-master** to **openssl-xcode** to have **/Users/user/TBuild/Libraries/openssl-xcode/openssl.xcodeproj** project
 
 http://www.openssl.org/source/ > Download [**openssl-1.0.1h.tar.gz**](http://www.openssl.org/source/openssl-1.0.1h.tar.gz) (4.3 Mb)
 
@@ -78,8 +76,6 @@ Using se system lib
 Get sources from https://github.com/telegramdesktop/libexif-0.6.20, by git – in Terminal go to **/Users/user/TBuild/Libraries** and run
 
     git clone https://github.com/telegramdesktop/libexif-0.6.20.git
-
-or download in ZIP and extract to **/Users/user/TBuild/Libraries**, rename **libexif-0.6.20-master** to **libexif-0.6.20** to have **/Users/user/TBuild/Libraries/libexif-0.6.20/configure** script
 
 #####Building library
 
@@ -131,7 +127,7 @@ In Terminal go to **/Users/user/TBuild/Libraries** and run:
 
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
-    git checkout release/2.8
+    git checkout release/3.2
 
 #####Building libraries
 
@@ -163,8 +159,8 @@ Then in Terminal go to **/Users/user/TBuild/Libraries/ffmpeg** and run
 
 In Terminal go to **/Users/user/TBuild/Libraries** and run:
 
-    git clone git://code.qt.io/qt/qt5.git QtStatic
-    cd QtStatic
+    git clone git://code.qt.io/qt/qt5.git qt5_3_2
+    cd qt5_3_2
     git checkout 5.3
     perl init-repository --module-subset=qtbase,qtimageformats
     git checkout v5.3.2
@@ -173,19 +169,19 @@ In Terminal go to **/Users/user/TBuild/Libraries** and run:
 
 #####Apply the patch
 
-From **/Users/user/TBuild/Libraries/QtStatic/qtbase**, run:
+From **/Users/user/TBuild/Libraries/qt5_3_2/qtbase**, run:
 
     git apply ../../../tdesktop/Telegram/Patches/qtbase_5_3_2.diff
 
-From **/Users/user/TBuild/Libraries/QtStatic/qtimageformats**, run:
+From **/Users/user/TBuild/Libraries/qt5_3_2/qtimageformats**, run:
 
     git apply ../../../tdesktop/Telegram/Patches/qtimageformats_5_3_2.diff
 
 #####Building library
 
-Go to **/Users/user/TBuild/Libraries/QtStatic** and run:
+Go to **/Users/user/TBuild/Libraries/qt5_3_2** and run:
 
-    ./configure -debug-and-release -force-debug-info -opensource -confirm-license -static -opengl desktop -nomake examples -nomake tests -platform macx-g++
+    OPENSSL_LIBS="/Users/user/TBuild/Libraries/openssl-xcode_oldmac/libssl.a /Users/user/TBuild/Libraries/openssl-xcode_oldmac/libcrypto.a" ./configure -prefix "/usr/local/tdesktop/Qt-5.3.2" -debug-and-release -force-debug-info -opensource -confirm-license -static -opengl desktop -openssl-linked -I "/Users/user/TBuild/Libraries/openssl-xcode_oldmac/include" -nomake examples -nomake tests -platform macx-g++
     make -j4
     sudo make -j4 install
 
@@ -199,3 +195,5 @@ building (**make** command) will take really long time.
 * Open Telegram.xcodeproj and build for Debug
 * Build Updater target as well, it is required for Telegram relaunch
 * Release Telegram build will require removing **CUSTOM_API_ID** definition in Telegram target settings (Apple LLVM 6.1 - Custom Compiler Flags > Other C / C++ Flags > Release)
+
+[xcode]: building-xcode.md

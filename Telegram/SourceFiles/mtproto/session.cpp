@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
@@ -70,7 +70,7 @@ void SessionData::clear() {
 }
 
 
-Session::Session(int32 dcenter) : QObject()
+Session::Session(int32 requestedDcId) : QObject()
 , _connection(0)
 , _killed(false)
 , _needToReceive(false)
@@ -96,35 +96,40 @@ Session::Session(int32 dcenter) : QObject()
 
 	connect(&sender, SIGNAL(timeout()), this, SLOT(needToResumeAndSend()));
 
-	DcenterMap &dcs(DCMap());
-
 	_connection = new Connection();
-	dcWithShift = _connection->start(&data, dcenter);
+	dcWithShift = _connection->prepare(&data, requestedDcId);
 	if (!dcWithShift) {
 		delete _connection;
 		_connection = 0;
-		DEBUG_LOG(("Session Info: could not start connection to dc %1").arg(dcenter));
+		DEBUG_LOG(("Session Info: could not start connection to dc %1").arg(requestedDcId));
 		return;
 	}
-	if (!dc) {
-		dcenter = dcWithShift;
-		int32 dcId = bareDcId(dcWithShift);
-		auto dcIndex = dcs.constFind(dcId);
-		if (dcIndex == dcs.cend()) {
-			dc = DcenterPtr(new Dcenter(dcId, AuthKeyPtr()));
-			dcs.insert(dcId, dc);
-		} else {
-			dc = dcIndex.value();
-		}
+	createDcData();
+	_connection->start();
+}
 
-		ReadLockerAttempt lock(keyMutex());
-		data.setKey(lock ? dc->getKey() : AuthKeyPtr());
-		if (lock && dc->connectionInited()) {
-			data.setLayerWasInited(true);
-		}
-		connect(dc.data(), SIGNAL(authKeyCreated()), this, SLOT(authKeyCreatedForDC()), Qt::QueuedConnection);
-		connect(dc.data(), SIGNAL(layerWasInited(bool)), this, SLOT(layerWasInitedForDC(bool)), Qt::QueuedConnection);
+void Session::createDcData() {
+	if (dc) {
+		return;
 	}
+	int32 dcId = bareDcId(dcWithShift);
+
+	auto &dcs = DCMap();
+	auto dcIndex = dcs.constFind(dcId);
+	if (dcIndex == dcs.cend()) {
+		dc = DcenterPtr(new Dcenter(dcId, AuthKeyPtr()));
+		dcs.insert(dcId, dc);
+	} else {
+		dc = dcIndex.value();
+	}
+
+	ReadLockerAttempt lock(keyMutex());
+	data.setKey(lock ? dc->getKey() : AuthKeyPtr());
+	if (lock && dc->connectionInited()) {
+		data.setLayerWasInited(true);
+	}
+	connect(dc.data(), SIGNAL(authKeyCreated()), this, SLOT(authKeyCreatedForDC()), Qt::QueuedConnection);
+	connect(dc.data(), SIGNAL(layerWasInited(bool)), this, SLOT(layerWasInitedForDC(bool)), Qt::QueuedConnection);
 }
 
 void Session::restart() {
@@ -160,12 +165,12 @@ void Session::unpaused() {
 	}
 }
 
-void Session::sendAnything(quint64 msCanWait) {
+void Session::sendAnything(qint64 msCanWait) {
 	if (_killed) {
 		DEBUG_LOG(("Session Error: can't send anything in a killed session"));
 		return;
 	}
-	uint64 ms = getms(true);
+	auto ms = getms(true);
 	if (msSendCall) {
 		if (ms > msSendCall + msWait) {
 			msWait = 0;
@@ -200,13 +205,15 @@ void Session::needToResumeAndSend() {
 		DcenterMap &dcs(DCMap());
 
 		_connection = new Connection();
-		if (!_connection->start(&data, dcWithShift)) {
+		if (!_connection->prepare(&data, dcWithShift)) {
 			delete _connection;
 			_connection = 0;
 			DEBUG_LOG(("Session Info: could not start connection to dcWithShift %1").arg(dcWithShift));
 			dcWithShift = 0;
 			return;
 		}
+		createDcData();
+		_connection->start();
 	}
 	if (_ping) {
 		_ping = false;
@@ -222,7 +229,7 @@ void Session::sendPong(quint64 msgId, quint64 pingId) {
 
 void Session::sendMsgsStateInfo(quint64 msgId, QByteArray data) {
 	MTPMsgsStateInfo req(MTP_msgs_state_info(MTP_long(msgId), MTPstring()));
-	string &info(req._msgs_state_info().vinfo._string().v);
+	auto &info = req._msgs_state_info().vinfo._string().v;
 	info.resize(data.size());
 	if (!data.isEmpty()) {
 		memcpy(&info[0], data.constData(), data.size());
@@ -239,7 +246,7 @@ void Session::checkRequestsByTimer() {
 		QReadLocker locker(data.haveSentMutex());
 		mtpRequestMap &haveSent(data.haveSentMap());
 		uint32 haveSentCount(haveSent.size());
-		uint64 ms = getms(true);
+		auto ms = getms(true);
 		for (mtpRequestMap::iterator i = haveSent.begin(), e = haveSent.end(); i != e; ++i) {
 			mtpRequest &req(i.value());
 			if (req->msDate > 0) {
@@ -379,7 +386,7 @@ QString Session::transport() const {
 	return _connection ? _connection->transport() : QString();
 }
 
-mtpRequestId Session::resend(quint64 msgId, quint64 msCanWait, bool forceContainer, bool sendMsgStateInfo) {
+mtpRequestId Session::resend(quint64 msgId, qint64 msCanWait, bool forceContainer, bool sendMsgStateInfo) {
 	mtpRequest request;
 	{
 		QWriteLocker locker(data.haveSentMutex());
@@ -391,7 +398,7 @@ mtpRequestId Session::resend(quint64 msgId, quint64 msCanWait, bool forceContain
 				char cantResend[2] = {1, 0};
 				DEBUG_LOG(("Message Info: cant resend %1, request not found").arg(msgId));
 
-				return send(MTP_msgs_state_info(MTP_long(msgId), MTP_string(string(cantResend, cantResend + 1))));
+				return send(MTP_msgs_state_info(MTP_long(msgId), MTP_string(std::string(cantResend, cantResend + 1))));
 			}
 			return 0;
 		}
@@ -419,7 +426,7 @@ mtpRequestId Session::resend(quint64 msgId, quint64 msCanWait, bool forceContain
 	}
 }
 
-void Session::resendMany(QVector<quint64> msgIds, quint64 msCanWait, bool forceContainer, bool sendMsgStateInfo) {
+void Session::resendMany(QVector<quint64> msgIds, qint64 msCanWait, bool forceContainer, bool sendMsgStateInfo) {
 	for (int32 i = 0, l = msgIds.size(); i < l; ++i) {
 		resend(msgIds.at(i), msCanWait, forceContainer, sendMsgStateInfo);
 	}
@@ -440,7 +447,7 @@ void Session::resendAll() {
 	}
 }
 
-void Session::sendPrepared(const mtpRequest &request, uint64 msCanWait, bool newRequest) { // returns true, if emit of needToSend() is needed
+void Session::sendPrepared(const mtpRequest &request, TimeMs msCanWait, bool newRequest) { // returns true, if emit of needToSend() is needed
 	{
 		QWriteLocker locker(data.toSendMutex());
 		data.toSendMap().insert(request->requestId, request);

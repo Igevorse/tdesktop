@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -44,17 +44,17 @@ public:
 	}
 
 	uint32 getDC() const {
-		if (!_isset) throw mtpErrorKeyNotReady("getDC()");
+		t_assert(_isset);
 		return _dc;
 	}
 
 	uint64 keyId() const {
-		if (!_isset) throw mtpErrorKeyNotReady("keyId()");
+		t_assert(_isset);
 		return _keyId;
 	}
 
 	void prepareAES(const MTPint128 &msgKey, MTPint256 &aesKey, MTPint256 &aesIV, bool send = true) const {
-		if (!_isset) throw mtpErrorKeyNotReady(QString("prepareAES(..., %1)").arg(Logs::b(send)));
+		t_assert(_isset);
 
 		uint32 x = send ? 0 : 8;
 
@@ -90,7 +90,7 @@ public:
 	}
 
 	void write(QDataStream &to) const {
-		if (!_isset) throw mtpErrorKeyNotReady("write(...)");
+		t_assert(_isset);
 		to.writeRawData(_key, 256);
 	}
 

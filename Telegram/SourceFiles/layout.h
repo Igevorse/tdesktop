@@ -16,9 +16,11 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
+
+#include "core/runtime_composer.h"
 
 static constexpr TextSelection FullSelection = { 0xFFFF, 0xFFFF };
 
@@ -26,13 +28,17 @@ extern TextParseOptions _textNameOptions, _textDlgOptions;
 extern TextParseOptions _historyTextOptions, _historyBotOptions, _historyTextNoMonoOptions, _historyBotNoMonoOptions;
 
 const TextParseOptions &itemTextOptions(History *h, PeerData *f);
+const TextParseOptions &itemTextOptions(const HistoryItem *item);
 const TextParseOptions &itemTextNoMonoOptions(History *h, PeerData *f);
+const TextParseOptions &itemTextNoMonoOptions(const HistoryItem *item);
 
 enum RoundCorners {
 	SmallMaskCorners = 0x00, // for images
 	LargeMaskCorners,
 
-	WhiteCorners,
+	BoxCorners,
+	MenuCorners,
+	BotKbOverCorners,
 	StickerCorners,
 	StickerSelectedCorners,
 	SelectedOverlaySmallCorners,
@@ -48,10 +54,10 @@ enum RoundCorners {
 	BotKeyboardDownCorners,
 	PhotoSelectOverlayCorners,
 
-	DocBlueCorners,
-	DocGreenCorners,
-	DocRedCorners,
-	DocYellowCorners,
+	Doc1Corners,
+	Doc2Corners,
+	Doc3Corners,
+	Doc4Corners,
 
 	InShadowCorners, // for photos without bg
 	InSelectedShadowCorners,
@@ -76,25 +82,25 @@ QString formatGifAndSizeText(qint64 size);
 QString formatPlayedText(qint64 played, qint64 duration);
 
 QString documentName(DocumentData *document);
+TextWithEntities documentNameWithEntities(DocumentData *document);
 int32 documentColorIndex(DocumentData *document, QString &ext);
-style::color documentColor(int32 colorIndex);
-style::color documentDarkColor(int32 colorIndex);
-style::color documentOverColor(int32 colorIndex);
-style::color documentSelectedColor(int32 colorIndex);
-style::sprite documentCorner(int32 colorIndex);
-RoundCorners documentCorners(int32 colorIndex);
+style::color documentColor(int colorIndex);
+style::color documentDarkColor(int colorIndex);
+style::color documentOverColor(int colorIndex);
+style::color documentSelectedColor(int colorIndex);
+RoundCorners documentCorners(int colorIndex);
 bool documentIsValidMediaFile(const QString &filepath);
 
 class PaintContextBase {
 public:
-	PaintContextBase(uint64 ms, bool selecting) : ms(ms), selecting(selecting) {
+	PaintContextBase(TimeMs ms, bool selecting) : ms(ms), selecting(selecting) {
 	}
-	uint64 ms;
+	TimeMs ms;
 	bool selecting;
 
 };
 
-class LayoutItemBase : public Composer, public ClickHandlerHost {
+class LayoutItemBase : public RuntimeComposer, public ClickHandlerHost {
 public:
 	LayoutItemBase() {
 	}

@@ -13,7 +13,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "pspecific.h"
@@ -25,6 +25,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #include "localstorage.h"
 #include "passcodewidget.h"
+#include "history/history_location_manager.h"
 
 #include <execinfo.h>
 
@@ -48,12 +49,14 @@ namespace {
 };
 
 namespace {
-	QRect _monitorRect;
-	uint64 _monitorLastGot = 0;
-}
+
+QRect _monitorRect;
+TimeMs _monitorLastGot = 0;
+
+} // namespace
 
 QRect psDesktopRect() {
-	uint64 tnow = getms(true);
+	auto tnow = getms(true);
 	if (tnow > _monitorLastGot + 1000 || tnow < _monitorLastGot) {
 		_monitorLastGot = tnow;
 		_monitorRect = QApplication::desktop()->availableGeometry(App::wnd());
@@ -285,8 +288,10 @@ void psDeleteDir(const QString &dir) {
 }
 
 namespace {
-	uint64 _lastUserAction = 0;
-}
+
+auto _lastUserAction = 0LL;
+
+} // namespace
 
 void psUserActionDone() {
 	_lastUserAction = getms(true);
@@ -296,17 +301,9 @@ bool psIdleSupported() {
 	return objc_idleSupported();
 }
 
-uint64 psIdleTime() {
-	int64 idleTime = 0;
+TimeMs psIdleTime() {
+	auto idleTime = 0LL;
 	return objc_idleTime(idleTime) ? idleTime : (getms(true) - _lastUserAction);
-}
-
-bool psSkipAudioNotify() {
-	return false;
-}
-
-bool psSkipDesktopNotify() {
-	return false;
 }
 
 QStringList psInitLogs() {
@@ -412,6 +409,10 @@ void finish() {
 	objc_finish();
 }
 
+bool TransparentWindowsSupported(QPoint globalPosition) {
+        return true;
+}
+
 namespace ThirdParty {
 
 void start() {
@@ -446,16 +447,8 @@ void psSendToMenu(bool send, bool silent) {
 void psUpdateOverlayed(QWidget *widget) {
 }
 
-QString psConvertFileUrl(const QUrl &url) {
-	auto urlString = url.toLocalFile();
-	if (urlString.startsWith(qsl("/.file/id="))) {
-		return objc_convertFileUrl(urlString);
-	}
-	return urlString;
-}
-
 void psDownloadPathEnableAccess() {
-	objc_downloadPathEnableAccess(cDownloadPathBookmark());
+	objc_downloadPathEnableAccess(Global::DownloadPathBookmark());
 }
 
 QByteArray psDownloadPathBookmark(const QString &path) {
@@ -477,12 +470,12 @@ QString strNotificationAboutThemeChange() {
 
 QString strNotificationAboutScreenLocked() {
 	const uint32 letters[] = { 0x22008263, 0x0800DB6F, 0x45004F6D, 0xCC00972E, 0x0E00A861, 0x9700D970, 0xA100D570, 0x8900686C, 0xB300B365, 0xFE00DE2E, 0x76009B73, 0xFA00BF63, 0xE000A772, 0x9C009F65, 0x4E006065, 0xD900426E, 0xB7007849, 0x64006473, 0x6700824C, 0xE300706F, 0x7C00A063, 0x8F00D76B, 0x04001C65, 0x1C00A664 };
-	return strMakeFromLetters(letters, arraysize(letters));
+	return strMakeFromLetters(letters, base::array_size(letters));
 }
 
 QString strNotificationAboutScreenUnlocked() {
 	const uint32 letters[] = { 0x9200D763, 0xC8003C6F, 0xD2003F6D, 0x6000012E, 0x36004061, 0x4400E570, 0xA500BF70, 0x2E00796C, 0x4A009E65, 0x2E00612E, 0xC8001D73, 0x57002263, 0xF0005872, 0x49000765, 0xE5008D65, 0xE600D76E, 0xE8007049, 0x19005C73, 0x34009455, 0xB800B36E, 0xF300CA6C, 0x4C00806F, 0x5300A763, 0xD1003B6B, 0x63003565, 0xF800F264 };
-	return strMakeFromLetters(letters, arraysize(letters));
+	return strMakeFromLetters(letters, base::array_size(letters));
 }
 
 QString strStyleOfInterface() {

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "observer_peer.h"
@@ -31,32 +31,23 @@ void emitPeerUpdated();
 namespace Notify {
 namespace {
 
-using internal::PeerUpdateHandler;
-
 using SmallUpdatesList = QVector<PeerUpdate>;
 NeverFreedPointer<SmallUpdatesList> SmallUpdates;
 using AllUpdatesList = QMap<PeerData*, PeerUpdate>;
 NeverFreedPointer<AllUpdatesList> AllUpdates;
 
 void StartCallback() {
-	SmallUpdates.makeIfNull();
-	AllUpdates.makeIfNull();
+	SmallUpdates.createIfNull();
+	AllUpdates.createIfNull();
 }
 void FinishCallback() {
 	SmallUpdates.clear();
 	AllUpdates.clear();
 }
-ObservedEventRegistrator<PeerUpdate::Flags, PeerUpdateHandler> creator(StartCallback, FinishCallback);
+
+base::Observable<PeerUpdate, PeerUpdatedHandler> PeerUpdatedObservable;
 
 } // namespace
-
-namespace internal {
-
-ConnectionId plainRegisterPeerObserver(PeerUpdate::Flags events, PeerUpdateHandler &&handler) {
-	return creator.registerObserver(events, std_::forward<PeerUpdateHandler>(handler));
-}
-
-} // namespace internal
 
 void mergePeerUpdate(PeerUpdate &mergeTo, const PeerUpdate &mergeFrom) {
 	if (!(mergeTo.flags & PeerUpdate::Flag::NameChanged)) {
@@ -72,7 +63,8 @@ void mergePeerUpdate(PeerUpdate &mergeTo, const PeerUpdate &mergeFrom) {
 }
 
 void peerUpdatedDelayed(const PeerUpdate &update) {
-	t_assert(creator.started());
+	SmallUpdates.createIfNull();
+	AllUpdates.createIfNull();
 
 	Global::RefHandleDelayedPeerUpdates().call();
 
@@ -84,6 +76,7 @@ void peerUpdatedDelayed(const PeerUpdate &update) {
 			return;
 		}
 	}
+
 	if (AllUpdates->isEmpty()) {
 		if (existingUpdatesCount < 5) {
 			SmallUpdates->push_back(update);
@@ -101,24 +94,27 @@ void peerUpdatedDelayed(const PeerUpdate &update) {
 }
 
 void peerUpdatedSendDelayed() {
-	if (!creator.started()) return;
-
 	App::emitPeerUpdated();
 
-	if (SmallUpdates->isEmpty()) return;
+	if (!SmallUpdates || !AllUpdates || SmallUpdates->empty()) return;
 
-	auto smallList = createAndSwap(*SmallUpdates);
-	auto allList = createAndSwap(*AllUpdates);
-	for_const (auto &update, smallList) {
-		creator.notify(update.flags, update);
+	auto smallList = base::take(*SmallUpdates);
+	auto allList = base::take(*AllUpdates);
+	for (auto &update : smallList) {
+		PeerUpdated().notify(std_::move(update), true);
 	}
-	for_const (auto &update, allList) {
-		creator.notify(update.flags, update);
+	for (auto &update : allList) {
+		PeerUpdated().notify(std_::move(update), true);
 	}
+
 	if (SmallUpdates->isEmpty()) {
 		std::swap(smallList, *SmallUpdates);
 		SmallUpdates->resize(0);
 	}
+}
+
+base::Observable<PeerUpdate, PeerUpdatedHandler> &PeerUpdated() {
+	return PeerUpdatedObservable;
 }
 
 } // namespace Notify

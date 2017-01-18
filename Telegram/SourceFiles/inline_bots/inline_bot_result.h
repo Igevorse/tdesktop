@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -79,6 +79,7 @@ public:
 private:
 	void createPhoto();
 	void createDocument();
+	void createGame();
 
 	enum class Type {
 		Unknown,
@@ -92,6 +93,7 @@ private:
 		Contact,
 		Geo,
 		Venue,
+		Game,
 	};
 
 	friend class internal::SendData;
@@ -112,6 +114,7 @@ private:
 
 	DocumentData *_document = nullptr;
 	PhotoData *_photo = nullptr;
+	GameData *_game = nullptr;
 
 	std_::unique_ptr<MTPReplyMarkup> _mtpKeyboard;
 

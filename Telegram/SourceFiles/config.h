@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -97,9 +97,6 @@ enum {
 	MediaOverviewStartPerPage = 5,
 	MediaOverviewPreloadCount = 4,
 
-	// a new message from the same sender is attached to previous within 15 minutes
-	AttachMessageToPreviousSecondsDelta = 900,
-
 	AudioSimultaneousLimit = 4,
 	AudioCheckPositionTimeout = 100, // 100ms per check audio pos
 	AudioCheckPositionDelta = 2400, // update position called each 2400 samples
@@ -123,7 +120,6 @@ enum {
 
 	AnimationInMemory = 10 * 1024 * 1024, // 10 Mb gif and mp4 animations held in memory while playing
 
-	MediaViewImageSizeLimit = 100 * 1024 * 1024, // show up to 100mb jpg/png/gif docs in app
 	MaxZoomLevel = 7, // x8
 	ZoomToScreenLevel = 1024, // just constant
 
@@ -171,8 +167,6 @@ enum {
 
 	ChoosePeerByDragTimeout = 1000, // 1 second mouse not moved to choose dialog when dragging a file
 	ReloadChannelMembersTimeout = 1000, // 1 second wait before reload members in channel after adding
-
-	PinnedMessageTextLimit = 16,
 };
 
 inline bool isNotificationsUser(uint64 id) {
@@ -185,14 +179,22 @@ inline bool isServiceUser(uint64 id) {
 
 #ifdef Q_OS_WIN
 inline const GUID &cGUID() {
+#ifndef OS_MAC_STORE
 	static const GUID gGuid = { 0x87a94ab0, 0xe370, 0x4cde, { 0x98, 0xd3, 0xac, 0xc1, 0x10, 0xc5, 0x96, 0x7d } };
+#else // OS_MAC_STORE
+	static const GUID gGuid = { 0xe51fb841, 0x8c0b, 0x4ef9, { 0x9e, 0x9e, 0x5a, 0x0, 0x78, 0x56, 0x76, 0x27 } };
+#endif // OS_MAC_STORE
 
 	return gGuid;
 }
 #endif
 
 inline const char *cGUIDStr() {
+#ifndef OS_MAC_STORE
 	static const char *gGuidStr = "{87A94AB0-E370-4cde-98D3-ACC110C5967D}";
+#else // OS_MAC_STORE
+	static const char *gGuidStr = "{E51FB841-8C0B-4EF9-9E9E-5A0078567627}";
+#endif // OS_MAC_STORE
 
 	return gGuidStr;
 }
@@ -207,7 +209,7 @@ Efzk2DWgkBluml8OREmvfraX3bkHZJTKX4EQSjBbbdJ2ZXIsRrYOXfaA+xayEGB+\n\
 8hdlLmAjbCVfaigxX0CDqWeR1yFL9kwd9P0NsZRPsmoqVwMbMu7mStFai6aIhc3n\n\
 Slv8kg9qv1m6XHVQY3PnEw+QQtqSIXklHwIDAQAB\n\
 -----END RSA PUBLIC KEY-----"};
-	keysCount = arraysize(keys);
+	keysCount = base::array_size(keys);
 	return keys;
 }
 
@@ -284,6 +286,10 @@ static const int32 ApiId = 17349;
 static const char *ApiHash = "344583e45741c457fe1862106095a5eb";
 #endif
 
+#if Q_BYTE_ORDER == Q_BIG_ENDIAN
+#error "Only little endian is supported!"
+#endif // Q_BYTE_ORDER == Q_BIG_ENDIAN
+
 #ifndef BETA_VERSION_MACRO
 #error "Beta version macro is not defined."
 #endif
@@ -316,6 +322,16 @@ inline QString cApiAppVersion() {
 	return QString::number(AppVersion);
 }
 
+constexpr str_const AppLinksDomain = "t.me";
+
+inline QString CreateInternalLink(const QString &query) {
+	return str_const_toString(AppLinksDomain) + '/' + query;
+}
+
+inline QString CreateInternalLinkHttps(const QString &query) {
+	return qsl("https://") + CreateInternalLink(query);
+}
+
 extern QString gKeyFile;
 inline const QString &cDataFile() {
 	if (!gKeyFile.isEmpty()) return gKeyFile;
@@ -332,8 +348,6 @@ static const char *DefaultCountry = "US";
 static const char *DefaultLanguage = "en";
 
 enum {
-	DefaultChatBackground = 21,
-
 	DialogsFirstLoad = 20, // first dialogs part size requested
 	DialogsPerPage = 500, // next dialogs part size
 
@@ -344,8 +358,6 @@ enum {
 
 	DownloadPartSize = 64 * 1024, // 64kb for photo
 	DocumentDownloadPartSize = 128 * 1024, // 128kb for document
-	MaxUploadPhotoSize = 256 * 1024 * 1024, // 256mb photos max
-    MaxUploadDocumentSize = 1500 * 1024 * 1024, // 1500mb documents max
     UseBigFilesFrom = 10 * 1024 * 1024, // mtp big files methods used for files greater than 10mb
 	MaxFileQueries = 16, // max 16 file parts downloaded at the same time
 	MaxWebFileQueries = 8, // max 8 http[s] files downloaded at the same time
@@ -367,9 +379,7 @@ enum {
 	WaitForChannelGetDifference = 1000, // 1s wait after show channel history before sending getChannelDifference
 
 	MemoryForImageCache = 64 * 1024 * 1024, // after 64mb of unpacked images we try to clear some memory
-	NotifyWindowsCount = 3, // 3 desktop notifies at the same time
 	NotifySettingSaveTimeout = 1000, // wait 1 second before saving notify setting to server
-	NotifyDeletePhotoAfter = 60000, // delete notify photo after 1 minute
 	UpdateChunk = 100 * 1024, // 100kb parts when downloading the update
 	IdleMsecs = 60 * 1000, // after 60secs without user input we think we are idle
 
@@ -389,23 +399,24 @@ inline const QRegularExpression &cRussianLetters() {
 	return regexp;
 }
 
-inline QStringList cImgExtensions() {
-	static QStringList imgExtensions;
-	if (imgExtensions.isEmpty()) {
-		imgExtensions.reserve(4);
-		imgExtensions.push_back(qsl(".jpg"));
-		imgExtensions.push_back(qsl(".jpeg"));
-		imgExtensions.push_back(qsl(".png"));
-		imgExtensions.push_back(qsl(".gif"));
+inline const QStringList &cImgExtensions() {
+	static QStringList result;
+	if (result.isEmpty()) {
+		result.reserve(4);
+		result.push_back(qsl(".jpg"));
+		result.push_back(qsl(".jpeg"));
+		result.push_back(qsl(".png"));
+		result.push_back(qsl(".gif"));
 	}
-	return imgExtensions;
+	return result;
 }
 
-inline QStringList cPhotoExtensions() {
-	static QStringList photoExtensions;
-	if (photoExtensions.isEmpty()) {
-		photoExtensions.push_back(qsl(".jpg"));
-		photoExtensions.push_back(qsl(".jpeg"));
+inline const QStringList &cExtensionsForCompress() {
+	static QStringList result;
+	if (result.isEmpty()) {
+		result.push_back(qsl(".jpg"));
+		result.push_back(qsl(".jpeg"));
+		result.push_back(qsl(".png"));
 	}
-	return photoExtensions;
+	return result;
 }

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "profile/profile_userpic_button.h"
@@ -27,8 +27,10 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 namespace Profile {
 
-UserpicButton::UserpicButton(QWidget *parent, PeerData *peer) : Button(parent), _peer(peer) {
-	resize(st::profilePhotoSize, st::profilePhotoSize);
+UserpicButton::UserpicButton(QWidget *parent, PeerData *peer, int size) : AbstractButton(parent)
+, _size(size ? size : st::profilePhotoSize)
+, _peer(peer) {
+	resize(_size, _size);
 
 	processPeerPhoto();
 	_notShownYet = _waiting;
@@ -36,8 +38,16 @@ UserpicButton::UserpicButton(QWidget *parent, PeerData *peer) : Button(parent), 
 		_userpic = prepareUserpicPixmap();
 	}
 
-	Notify::registerPeerObserver(Notify::PeerUpdate::Flag::PhotoChanged, this, &UserpicButton::notifyPeerUpdated);
-	FileDownload::registerImageLoadedObserver(this, &UserpicButton::notifyImageLoaded);
+	auto observeEvents = Notify::PeerUpdate::Flag::PhotoChanged;
+	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(observeEvents, [this](const Notify::PeerUpdate &update) {
+		notifyPeerUpdated(update);
+	}));
+	subscribe(FileDownload::ImageLoaded(), [this] {
+		if (_waiting && _peer->userpicLoaded()) {
+			_waiting = false;
+			startNewPhotoShowing();
+		}
+	});
 }
 
 void UserpicButton::showFinished() {
@@ -45,7 +55,7 @@ void UserpicButton::showFinished() {
 		_notShownYet = false;
 		if (!_waiting) {
 			_a_appearance.finish();
-			START_ANIMATION(_a_appearance, func(this, &UserpicButton::refreshCallback), 0, 1, st::profilePhotoDuration, anim::linear);
+			_a_appearance.start([this] { update(); }, 0, 1, st::profilePhotoDuration);
 		}
 	}
 }
@@ -66,13 +76,6 @@ void UserpicButton::notifyPeerUpdated(const Notify::PeerUpdate &update) {
 
 	processNewPeerPhoto();
 	this->update();
-}
-
-void UserpicButton::notifyImageLoaded() {
-	if (_waiting && _peer->userpicLoaded()) {
-		_waiting = false;
-		startNewPhotoShowing();
-	}
 }
 
 void UserpicButton::processPeerPhoto() {
@@ -100,19 +103,19 @@ void UserpicButton::startNewPhotoShowing() {
 	}
 
 	_a_appearance.finish();
-	START_ANIMATION(_a_appearance, func(this, &UserpicButton::refreshCallback), 0, 1, st::profilePhotoDuration, anim::linear);
+	_a_appearance.start([this] { update(); }, 0, 1, st::profilePhotoDuration);
 	update();
 }
 
 QPixmap UserpicButton::prepareUserpicPixmap() const {
 	auto retina = cIntRetinaFactor();
-	auto size = st::profilePhotoSize * retina;
+	auto size = width() * retina;
 	QImage image(size, size, QImage::Format_ARGB32_Premultiplied);
 	image.setDevicePixelRatio(cRetinaFactor());
+	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
-		p.fillRect(0, 0, st::profilePhotoSize, st::profilePhotoSize, st::profileBg);
-		_peer->paintUserpic(p, st::profilePhotoSize, 0, 0);
+		_peer->paintUserpic(p, 0, 0, width());
 	}
 	return App::pixmapFromImageInPlace(std_::move(image));
 }

@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -27,12 +27,11 @@ static const ChannelId NoChannel = 0;
 
 typedef int32 MsgId;
 struct FullMsgId {
-	FullMsgId() : channel(NoChannel), msg(0) {
-	}
+	FullMsgId() = default;
 	FullMsgId(ChannelId channel, MsgId msg) : channel(channel), msg(msg) {
 	}
-	ChannelId channel;
-	MsgId msg;
+	ChannelId channel = NoChannel;
+	MsgId msg = 0;
 };
 
 typedef uint64 PeerId;
@@ -138,11 +137,12 @@ inline TimeId dateFromMessage(const MTPmessage &msg) {
 	return 0;
 }
 
-typedef uint64 PhotoId;
-typedef uint64 VideoId;
-typedef uint64 AudioId;
-typedef uint64 DocumentId;
-typedef uint64 WebPageId;
+using PhotoId = uint64;
+using VideoId = uint64;
+using AudioId = uint64;
+using DocumentId = uint64;
+using WebPageId = uint64;
+using GameId = uint64;
 static const WebPageId CancelledWebPageId = 0xFFFFFFFFFFFFFFFFULL;
 
 inline bool operator==(const FullMsgId &a, const FullMsgId &b) {
@@ -163,6 +163,7 @@ constexpr const MsgId ShowAtTheEndMsgId = -0x40000000;
 constexpr const MsgId SwitchAtTopMsgId = -0x3FFFFFFF;
 constexpr const MsgId ShowAtProfileMsgId = -0x3FFFFFFE;
 constexpr const MsgId ShowAndStartBotMsgId = -0x3FFFFFD;
+constexpr const MsgId ShowAtGameShareMsgId = -0x3FFFFFC;
 constexpr const MsgId ServerMaxMsgId = 0x3FFFFFFF;
 constexpr const MsgId ShowAtUnreadMsgId = 0;
 
@@ -171,7 +172,7 @@ struct NotifySettings {
 	}
 	MTPDpeerNotifySettings::Flags flags;
 	TimeId mute;
-	string sound;
+	std::string sound;
 	bool previews() const {
 		return flags & MTPDpeerNotifySettings::Flag::f_show_previews;
 	}
@@ -198,12 +199,37 @@ inline bool isNotifyMuted(NotifySettingsPtr settings, TimeId *changeIn = 0) {
 	return false;
 }
 
-static const int UserColorsCount = 8;
+static constexpr int kUserColorsCount = 8;
+static constexpr int kChatColorsCount = 4;
+static constexpr int kChannelColorsCount = 4;
 
 style::color peerColor(int index);
-ImagePtr userDefPhoto(int index);
-ImagePtr chatDefPhoto(int index);
-ImagePtr channelDefPhoto(int index);
+
+class EmptyUserpic {
+public:
+	EmptyUserpic();
+	EmptyUserpic(int index, const QString &name);
+
+	void set(int index, const QString &name);
+	void clear();
+
+	explicit operator bool() const {
+		return (_impl != nullptr);
+	}
+
+	void paint(Painter &p, int x, int y, int outerWidth, int size) const;
+	void paintRounded(Painter &p, int x, int y, int outerWidth, int size) const;
+	QPixmap generate(int size);
+	StorageKey uniqueKey() const;
+
+	~EmptyUserpic();
+
+private:
+	class Impl;
+	std_::unique_ptr<Impl> _impl;
+	friend class Impl;
+
+};
 
 static const PhotoId UnknownPeerPhotoId = 0xFFFFFFFFFFFFFFFFULL;
 
@@ -212,25 +238,7 @@ inline const QString &emptyUsername() {
 	return empty;
 }
 
-class PeerClickHandler : public LeftButtonClickHandler {
-public:
-	PeerClickHandler(PeerData *peer) : _peer(peer) {
-	}
-	PeerData *peer() const {
-		return _peer;
-	}
-
-private:
-	PeerData *_peer;
-
-};
-
-class PeerOpenClickHandler : public PeerClickHandler {
-public:
-	using PeerClickHandler::PeerClickHandler;
-protected:
-	void onClickImpl() const override;
-};
+ClickHandlerPtr peerOpenClickHandler(PeerData *peer);
 
 class UserData;
 class ChatData;
@@ -245,7 +253,7 @@ protected:
 public:
 	virtual ~PeerData() {
 		if (notify != UnknownNotifySettings && notify != EmptyNotifySettings) {
-			deleteAndMark(notify);
+			delete base::take(notify);
 		}
 	}
 
@@ -263,6 +271,9 @@ public:
 	}
 	bool isVerified() const;
 	bool isMegagroup() const;
+	bool isMuted() const {
+		return (notify != EmptyNotifySettings) && (notify != UnknownNotifySettings) && (notify->mute >= unixtime());
+	}
 	bool canWrite() const;
 	UserData *asUser();
 	const UserData *asUser() const;
@@ -287,9 +298,9 @@ public:
 
 	QString name;
 	Text nameText;
-	typedef QSet<QString> Names;
+	using Names = OrderedSet<QString>;
 	Names names; // for filtering
-	typedef QSet<QChar> NameFirstChars;
+	using NameFirstChars = OrderedSet<QChar>;
 	NameFirstChars chars;
 
 	enum LoadedStatus {
@@ -304,10 +315,11 @@ public:
 	style::color color;
 
 	void setUserpic(ImagePtr userpic);
-	void paintUserpic(Painter &p, int size, int x, int y) const;
-	void paintUserpicLeft(Painter &p, int size, int x, int y, int w) const {
-		paintUserpic(p, size, rtl() ? (w - x - size) : x, y);
+	void paintUserpic(Painter &p, int x, int y, int size) const;
+	void paintUserpicLeft(Painter &p, int x, int y, int w, int size) const {
+		paintUserpic(p, rtl() ? (w - x - size) : x, y, size);
 	}
+	void paintUserpicRounded(Painter &p, int x, int y, int size) const;
 	void loadUserpic(bool loadFirst = false, bool prior = true) {
 		_userpic->load(loadFirst, prior);
 	}
@@ -316,7 +328,9 @@ public:
 	}
 	StorageKey userpicUniqueKey() const;
 	void saveUserpic(const QString &path, int size) const;
+	void saveUserpicRounded(const QString &path, int size) const;
 	QPixmap genUserpic(int size) const;
+	QPixmap genUserpicRounded(int size) const;
 
 	PhotoId photoId = UnknownPeerPhotoId;
 	StorageImageLocation photoLoc;
@@ -333,7 +347,7 @@ public:
 
 	const ClickHandlerPtr &openLink() {
 		if (!_openLink) {
-			_openLink.reset(new PeerOpenClickHandler(this));
+			_openLink = peerOpenClickHandler(this);
 		}
 		return _openLink;
 	}
@@ -343,6 +357,7 @@ protected:
 
 	ImagePtr _userpic;
 	ImagePtr currentUserpic() const;
+	mutable EmptyUserpic _userpicEmpty;
 
 private:
 	void fillNames();
@@ -385,7 +400,7 @@ struct BotInfo {
 	QList<BotCommand> commands;
 	Text text = Text{ int(st::msgMinWidth) }; // description
 
-	QString startToken, startGroupToken;
+	QString startToken, startGroupToken, shareGameShortName;
 	PeerId inlineReturnPeerId = 0;
 };
 
@@ -480,11 +495,17 @@ public:
 		_restrictionReason = reason;
 	}
 
+	int commonChatsCount() const {
+		return _commonChatsCount;
+	}
+	void setCommonChatsCount(int count);
+
 private:
 	QString _restrictionReason;
 	QString _about;
 	QString _phone;
 	BlockStatus _blockStatus = BlockStatus::Unknown;
+	int _commonChatsCount = 0;
 
 };
 
@@ -627,14 +648,6 @@ private:
 };
 
 struct MegagroupInfo {
-	MegagroupInfo()
-		: botStatus(0)
-		, pinnedMsgId(0)
-		, joinedMessageFound(false)
-		, lastParticipantsStatus(LastParticipantsUpToDate)
-		, lastParticipantsCount(0)
-		, migrateFromPtr(0) {
-	}
 	typedef QList<UserData*> LastParticipants;
 	LastParticipants lastParticipants;
 	typedef OrderedSet<UserData*> LastAdmins;
@@ -643,20 +656,20 @@ struct MegagroupInfo {
 	MarkupSenders markupSenders;
 	typedef OrderedSet<UserData*> Bots;
 	Bots bots;
-	int32 botStatus; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
 
-	MsgId pinnedMsgId;
-	bool joinedMessageFound;
+	int botStatus = 0; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
+	MsgId pinnedMsgId = 0;
+	bool joinedMessageFound = false;
 
 	enum LastParticipantsStatus {
 		LastParticipantsUpToDate       = 0x00,
 		LastParticipantsAdminsOutdated = 0x01,
 		LastParticipantsCountOutdated  = 0x02,
 	};
-	mutable int32 lastParticipantsStatus;
-	int32 lastParticipantsCount;
+	mutable int lastParticipantsStatus = LastParticipantsUpToDate;
+	int lastParticipantsCount = 0;
 
-	ChatData *migrateFromPtr;
+	ChatData *migrateFromPtr = nullptr;
 };
 
 class ChannelData : public PeerData {
@@ -669,6 +682,9 @@ public:
 
 	void updateFull(bool force = false);
 	void fullUpdated();
+	bool wasFullUpdated() const {
+		return (_lastFullUpdate != 0);
+	}
 
 	uint64 access = 0;
 
@@ -756,7 +772,7 @@ public:
 		return flags & MTPDchannel::Flag::f_verified;
 	}
 	bool canAddMembers() const {
-		return amCreator() || amEditor() || (flags & MTPDchannel::Flag::f_democracy);
+		return amCreator() || amEditor() || (amIn() && (flags & MTPDchannel::Flag::f_democracy));
 	}
 	bool canEditPhoto() const {
 		return amCreator() || (amEditor() && isMegagroup());
@@ -810,6 +826,12 @@ public:
 	void ptsWaitingForShortPoll(int32 ms) { // < 0 - not waiting
 		return _ptsWaiter.setWaitingForShortPoll(this, ms);
 	}
+	bool ptsWaitingForSkipped() const {
+		return _ptsWaiter.waitingForSkipped();
+	}
+	bool ptsWaitingForShortPoll() const {
+		return _ptsWaiter.waitingForShortPoll();
+	}
 
 	QString restrictionReason() const override {
 		return _restrictionReason;
@@ -822,7 +844,7 @@ public:
 
 private:
 	PtsWaiter _ptsWaiter;
-	uint64 _lastFullUpdate = 0;
+	TimeMs _lastFullUpdate = 0;
 
 	int _membersCount = 1;
 	int _adminsCount = 1;
@@ -1029,12 +1051,10 @@ struct DocumentAdditionalData {
 };
 
 struct StickerData : public DocumentAdditionalData {
-	StickerData() : set(MTP_inputStickerSetEmpty()) {
-	}
 	ImagePtr img;
 	QString alt;
 
-	MTPInputStickerSet set;
+	MTPInputStickerSet set = MTP_inputStickerSetEmpty();
 	bool setInstalled() const;
 
 	StorageImageLocation loc; // doc thumb location
@@ -1084,6 +1104,7 @@ public:
 	};
 	bool loaded(FilePathResolveType type = FilePathResolveCached) const;
 	bool loading() const;
+	QString loadingFilePath() const;
 	bool displayLoading() const;
 	void save(const QString &toFile, ActionOnLoad action = ActionOnLoadNone, const FullMsgId &actionMsgId = FullMsgId(), LoadFromCloudSetting fromCloud = LoadFromCloudOrLocal, bool autoLoading = false);
 	void cancel();
@@ -1128,13 +1149,13 @@ public:
 		return (type == SongDocument) ? static_cast<SongData*>(_additional.get()) : nullptr;
 	}
 	const SongData *song() const {
-		return (type == SongDocument) ? static_cast<const SongData*>(_additional.get()) : nullptr;
+		return const_cast<DocumentData*>(this)->song();
 	}
 	VoiceData *voice() {
 		return (type == VoiceDocument) ? static_cast<VoiceData*>(_additional.get()) : nullptr;
 	}
 	const VoiceData *voice() const {
-		return (type == VoiceDocument) ? static_cast<const VoiceData*>(_additional.get()) : nullptr;
+		return const_cast<DocumentData*>(this)->voice();
 	}
 	bool isAnimation() const {
 		return (type == AnimatedDocument) || !mime.compare(qstr("image/gif"), Qt::CaseInsensitive);
@@ -1142,8 +1163,14 @@ public:
 	bool isGifv() const {
 		return (type == AnimatedDocument) && !mime.compare(qstr("video/mp4"), Qt::CaseInsensitive);
 	}
+	bool isTheme() const {
+		return name.endsWith(qstr(".tdesktop-theme"), Qt::CaseInsensitive);
+	}
 	bool isMusic() const {
-		return (type == SongDocument) ? !static_cast<SongData*>(_additional.get())->title.isEmpty() : false;
+		if (auto s = song()) {
+			return (s->duration > 0);
+		}
+		return false;
 	}
 	bool isVideo() const {
 		return (type == VideoDocument);
@@ -1318,7 +1345,7 @@ protected:
 class DocumentOpenClickHandler : public DocumentClickHandler {
 public:
 	using DocumentClickHandler::DocumentClickHandler;
-	static void doOpen(DocumentData *document, ActionOnLoad action = ActionOnLoadOpen);
+	static void doOpen(DocumentData *document, HistoryItem *context, ActionOnLoad action = ActionOnLoadOpen);
 protected:
 	void onClickImpl() const override;
 };
@@ -1354,6 +1381,7 @@ struct WebPageData {
 	WebPageData(const WebPageId &id, WebPageType type = WebPageArticle, const QString &url = QString(), const QString &displayUrl = QString(), const QString &siteName = QString(), const QString &title = QString(), const QString &description = QString(), DocumentData *doc = nullptr, PhotoData *photo = nullptr, int32 duration = 0, const QString &author = QString(), int32 pendingTill = -1);
 
 	void forget() {
+		if (document) document->forget();
 		if (photo) photo->forget();
 	}
 
@@ -1368,96 +1396,74 @@ struct WebPageData {
 
 };
 
+struct GameData {
+	GameData(const GameId &id, const uint64 &accessHash = 0, const QString &shortName = QString(), const QString &title = QString(), const QString &description = QString(), PhotoData *photo = nullptr, DocumentData *doc = nullptr);
+
+	void forget() {
+		if (document) document->forget();
+		if (photo) photo->forget();
+	}
+
+	GameId id;
+	uint64 accessHash;
+	QString shortName, title, description;
+	PhotoData *photo;
+	DocumentData *document;
+
+};
+
 QString saveFileName(const QString &title, const QString &filter, const QString &prefix, QString name, bool savingAs, const QDir &dir = QDir());
 MsgId clientMsgId();
 
 struct MessageCursor {
-	MessageCursor() : position(0), anchor(0), scroll(QFIXED_MAX) {
-	}
+	MessageCursor() = default;
 	MessageCursor(int position, int anchor, int scroll) : position(position), anchor(anchor), scroll(scroll) {
 	}
-	MessageCursor(const QTextEdit &edit) {
+	MessageCursor(const QTextEdit *edit) {
 		fillFrom(edit);
 	}
-	void fillFrom(const QTextEdit &edit) {
-		QTextCursor c = edit.textCursor();
+	void fillFrom(const QTextEdit *edit) {
+		QTextCursor c = edit->textCursor();
 		position = c.position();
 		anchor = c.anchor();
-		QScrollBar *s = edit.verticalScrollBar();
+		QScrollBar *s = edit->verticalScrollBar();
 		scroll = (s && (s->value() != s->maximum())) ? s->value() : QFIXED_MAX;
 	}
-	void applyTo(QTextEdit &edit) {
-		QTextCursor c = edit.textCursor();
-		c.setPosition(anchor, QTextCursor::MoveAnchor);
-		c.setPosition(position, QTextCursor::KeepAnchor);
-		edit.setTextCursor(c);
-		QScrollBar *s = edit.verticalScrollBar();
-		if (s) s->setValue(scroll);
+	void applyTo(QTextEdit *edit) {
+		auto cursor = edit->textCursor();
+		cursor.setPosition(anchor, QTextCursor::MoveAnchor);
+		cursor.setPosition(position, QTextCursor::KeepAnchor);
+		edit->setTextCursor(cursor);
+		if (auto scrollbar = edit->verticalScrollBar()) {
+			scrollbar->setValue(scroll);
+		}
 	}
-	int position, anchor, scroll;
+	int position = 0;
+	int anchor = 0;
+	int scroll = QFIXED_MAX;
+
 };
 
 inline bool operator==(const MessageCursor &a, const MessageCursor &b) {
 	return (a.position == b.position) && (a.anchor == b.anchor) && (a.scroll == b.scroll);
 }
 
-struct LocationCoords {
-	LocationCoords() : lat(0), lon(0) {
+struct SendAction {
+	enum class Type {
+		Typing,
+		RecordVideo,
+		UploadVideo,
+		RecordVoice,
+		UploadVoice,
+		UploadPhoto,
+		UploadFile,
+		ChooseLocation,
+		ChooseContact,
+		PlayGame,
+	};
+	SendAction(Type type, TimeMs until, int progress = 0) : type(type), until(until), progress(progress) {
 	}
-	LocationCoords(float64 lat, float64 lon) : lat(lat), lon(lon) {
-	}
-	LocationCoords(const MTPDgeoPoint &point) : lat(point.vlat.v), lon(point.vlong.v) {
-	}
-	float64 lat, lon;
-};
-inline bool operator==(const LocationCoords &a, const LocationCoords &b) {
-	return (a.lat == b.lat) && (a.lon == b.lon);
-}
-inline bool operator<(const LocationCoords &a, const LocationCoords &b) {
-	return (a.lat < b.lat) || ((a.lat == b.lat) && (a.lon < b.lon));
-}
-inline uint qHash(const LocationCoords &t, uint seed = 0) {
-	return qHash(QtPrivate::QHashCombine().operator()(qHash(t.lat), t.lon), seed);
-}
-
-struct LocationData {
-	LocationData(const LocationCoords &coords) : coords(coords), loading(false) {
-	}
-
-	LocationCoords coords;
-	ImagePtr thumb;
-	bool loading;
-
-	void load();
-};
-
-class LocationClickHandler : public ClickHandler {
-public:
-	LocationClickHandler(const LocationCoords &coords) : _coords(coords) {
-		setup();
-	}
-
-	void onClick(Qt::MouseButton button) const override;
-
-	QString tooltip() const override {
-		return QString();
-	}
-
-	QString dragText() const override {
-		return _text;
-	}
-
-	void copyToClipboard() const override {
-		if (!_text.isEmpty()) {
-			QApplication::clipboard()->setText(_text);
-		}
-	}
-	QString copyToClipboardContextItemText() const override;
-
-private:
-
-	void setup();
-	LocationCoords _coords;
-	QString _text;
-
+	Type type;
+	TimeMs until;
+	int progress;
 };

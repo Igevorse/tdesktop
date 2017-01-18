@@ -16,54 +16,53 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-#include "abstractbox.h"
+#include "boxes/abstractbox.h"
 
-class PhotoCropBox : public AbstractBox {
+class PhotoCropBox : public BoxContent {
 	Q_OBJECT
 
 public:
+	PhotoCropBox(QWidget*, const QImage &img, const PeerId &peer);
+	PhotoCropBox(QWidget*, const QImage &img, PeerData *peer);
 
-	PhotoCropBox(const QImage &img, const PeerId &peer);
-	PhotoCropBox(const QImage &img, PeerData *peer);
-	void keyPressEvent(QKeyEvent *e);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
-
-	void mousePressEvent(QMouseEvent *e);
-	void mouseReleaseEvent(QMouseEvent *e);
-	void mouseMoveEvent(QMouseEvent *e);
 	int32 mouseState(QPoint p);
 
-public slots:
-
-	void onSend();
-	void onReady(const QImage &tosend);
+	void closeHook() override {
+		emit closed();
+	}
 
 signals:
-
 	void ready(const QImage &tosend);
+	void closed();
+
+private slots:
+	void onReady(const QImage &tosend);
 
 protected:
+	void prepare() override;
 
-	void hideAll();
-	void showAll();
+	void keyPressEvent(QKeyEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
 
 private:
-
 	void init(const QImage &img, PeerData *peer);
+	void sendPhoto();
 
 	QString _title;
-	int32 _downState;
+	int32 _downState = 0;
 	int32 _thumbx, _thumby, _thumbw, _thumbh;
 	int32 _cropx, _cropy, _cropw;
 	int32 _fromposx, _fromposy, _fromcropx, _fromcropy, _fromcropw;
-	BoxButton _done, _cancel;
 	QImage _img;
 	QPixmap _thumb;
+	QImage _mask, _fade;
 	PeerId _peerId;
 
 };

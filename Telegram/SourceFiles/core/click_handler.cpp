@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "core/click_handler.h"
@@ -50,7 +50,7 @@ bool ClickHandler::setActive(const ClickHandlerPtr &p, ClickHandlerHost *host) {
 		}
 	}
 	if (p) {
-		_active.makeIfNull();
+		_active.createIfNull();
 		*_active = p;
 		if ((_activeHost = host)) {
 			bool emitClickHandlerActiveChanged = (!_pressed || !*_pressed || *_pressed == *_active);

@@ -16,26 +16,14 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "window/main_window.h"
 #include "pspecific_mac_p.h"
 
-class NotifyWindow;
-
 namespace Platform {
-
-class MacPrivate : public PsMacWindowPrivate {
-public:
-
-	void activeSpaceChanged();
-	void darkModeChanged();
-	void notifyClicked(unsigned long long peer, int msgid);
-	void notifyReplied(unsigned long long peer, int msgid, const char *str);
-
-};
 
 class MainWindow : public Window::MainWindow {
 	Q_OBJECT
@@ -43,55 +31,35 @@ class MainWindow : public Window::MainWindow {
 public:
 	MainWindow();
 
-	int32 psResizeRowWidth() const {
-		return 0;//st::wndResizeAreaWidth;
-	}
-
-	void psInitFrameless();
-	void psInitSize();
-
 	void psFirstShow();
 	void psInitSysMenu();
 	void psUpdateSysMenu(Qt::WindowState state);
 	void psUpdateMargins();
-	void psUpdatedPosition();
-
-	bool psHandleTitle();
 
 	void psFlash();
 
 	void psUpdateWorkmode();
 
-	void psRefreshTaskbarIcon();
-
-	bool psPosInited() const {
-		return posInited;
+	void psRefreshTaskbarIcon() {
 	}
 
 	bool psFilterNativeEvent(void *event);
-
-	void psActivateNotify(NotifyWindow *w);
-	void psClearNotifies(PeerId peerId = 0);
-	void psNotifyShown(NotifyWindow *w);
-	void psPlatformNotify(HistoryItem *item, int32 fwdCount);
-
-	bool eventFilter(QObject *obj, QEvent *evt) override;
-
-	void psUpdateCounter();
 
 	bool psHasNativeNotifications() {
 		return !(QSysInfo::macVersion() < QSysInfo::MV_10_8);
 	}
 
-	virtual QImage iconWithCounter(int size, int count, style::color bg, bool smallIcon) = 0;
+	virtual QImage iconWithCounter(int size, int count, style::color bg, style::color fg, bool smallIcon) = 0;
 
-	void closeWithoutDestroy() override;
+	int getCustomTitleHeight() const {
+		return _customTitleHeight;
+	}
 
 	~MainWindow();
 
+	class Private;
+
 public slots:
-	void psUpdateDelegate();
-	void psSavePosition(Qt::WindowState state = Qt::WindowActive);
 	void psShowTrayMenu();
 
 	void psMacUndo();
@@ -106,16 +74,20 @@ private slots:
 	void onHideAfterFullScreen();
 
 protected:
+	bool eventFilter(QObject *obj, QEvent *evt) override;
+
 	void stateChangedHook(Qt::WindowState state) override;
+	void initHook() override;
+	void titleVisibilityChangedHook() override;
+	void unreadCounterChangedHook() override;
 
 	QImage psTrayIcon(bool selected = false) const;
-	bool psHasTrayIcon() const {
+	bool hasTrayIcon() const override {
 		return trayIcon;
 	}
 
-	void psMacUpdateMenu();
+	void updateGlobalMenuHook() override;
 
-	bool posInited;
 	QSystemTrayIcon *trayIcon = nullptr;
 	QMenu *trayIconMenu = nullptr;
 	QImage icon256, iconbig256;
@@ -129,8 +101,15 @@ protected:
 
 	QTimer psUpdatedPositionTimer;
 
+	void closeWithoutDestroy() override;
+
 private:
-	MacPrivate _private;
+	void createGlobalMenu();
+	void updateTitleCounter();
+	void updateIconCounters();
+
+	friend class Private;
+	std_::unique_ptr<Private> _private;
 
 	mutable bool psIdle;
 	mutable QTimer psIdleTimer;
@@ -151,6 +130,8 @@ private:
 	QAction *psNewGroup = nullptr;
 	QAction *psNewChannel = nullptr;
 	QAction *psShowTelegram = nullptr;
+
+	int _customTitleHeight = 0;
 
 };
 

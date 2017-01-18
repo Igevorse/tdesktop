@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
@@ -37,7 +37,7 @@ AutoConnection::AutoConnection(QThread *thread) : AbstractTCPConnection(thread)
 	manager.moveToThread(thread);
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	manager.setProxy(QNetworkProxy(QNetworkProxy::DefaultProxy));
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 
 	httpStartTimer.moveToThread(thread);
 	httpStartTimer.setSingleShot(true);
@@ -50,7 +50,7 @@ AutoConnection::AutoConnection(QThread *thread) : AbstractTCPConnection(thread)
 	sock.moveToThread(thread);
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	sock.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 	connect(&sock, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(socketError(QAbstractSocket::SocketError)));
 	connect(&sock, SIGNAL(connected()), this, SLOT(onSocketConnected()));
 	connect(&sock, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));

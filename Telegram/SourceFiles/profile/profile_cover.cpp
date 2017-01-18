@@ -16,18 +16,18 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "profile/profile_cover.h"
 
 #include "styles/style_profile.h"
+#include "styles/style_window.h"
 #include "profile/profile_cover_drop_area.h"
 #include "profile/profile_userpic_button.h"
-#include "ui/buttons/round_button.h"
+#include "ui/widgets/buttons.h"
 #include "ui/filedialog.h"
-#include "ui/flatlabel.h"
-#include "ui/flatbutton.h"
+#include "ui/widgets/labels.h"
 #include "observer_peer.h"
 #include "boxes/confirmbox.h"
 #include "boxes/contactsbox.h"
@@ -37,6 +37,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "application.h"
+#include "platform/platform_file_dialog.h"
 
 namespace Profile {
 namespace {
@@ -67,9 +68,15 @@ CoverWidget::CoverWidget(QWidget *parent, PeerData *peer) : TWidget(parent)
 
 	auto observeEvents = ButtonsUpdateFlags
 		| UpdateFlag::NameChanged
-		| UpdateFlag::UserOnlineChanged;
-	Notify::registerPeerObserver(observeEvents, this, &CoverWidget::notifyPeerUpdated);
-	FileDialog::registerObserver(this, &CoverWidget::notifyFileQueryUpdated);
+		| UpdateFlag::UserOnlineChanged
+		| UpdateFlag::MembersChanged
+		| UpdateFlag::PhotoChanged;
+	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(observeEvents, [this](const Notify::PeerUpdate &update) {
+		notifyPeerUpdated(update);
+	}));
+	subscribe(FileDialog::QueryDone(), [this](const FileDialog::QueryUpdate &update) {
+		notifyFileQueryUpdated(update);
+	});
 
 	connect(App::app(), SIGNAL(peerPhotoDone(PeerId)), this, SLOT(onPhotoUploadStatusChanged(PeerId)));
 	connect(App::app(), SIGNAL(peerPhotoFail(PeerId)), this, SLOT(onPhotoUploadStatusChanged(PeerId)));
@@ -84,7 +91,8 @@ CoverWidget::CoverWidget(QWidget *parent, PeerData *peer) : TWidget(parent)
 }
 
 PhotoData *CoverWidget::validatePhoto() const {
-	PhotoData *photo = (_peer->photoId && _peer->photoId != UnknownPeerPhotoId) ? App::photo(_peer->photoId) : nullptr;
+	auto photo = (_peer->photoId && _peer->photoId != UnknownPeerPhotoId) ? App::photo(_peer->photoId) : nullptr;
+	_userpicButton->setPointerCursor(photo != nullptr && photo->date != 0);
 	if ((_peer->photoId == UnknownPeerPhotoId) || (_peer->photoId && (!photo || !photo->date))) {
 		App::api()->requestFullPeer(_peer);
 		return nullptr;
@@ -107,11 +115,11 @@ void CoverWidget::onCancelPhotoUpload() {
 
 int CoverWidget::countPhotoLeft(int newWidth) const {
 	int result = st::profilePhotoLeftMin;
-	result += (newWidth - st::wndMinWidth) / 2;
+	result += (newWidth - st::windowMinWidth) / 2;
 	return qMin(result, st::profilePhotoLeftMax);
 }
 
-void CoverWidget::resizeToWidth(int newWidth) {
+int CoverWidget::resizeGetHeight(int newWidth) {
 	int newHeight = 0;
 
 	newHeight += st::profileMarginTop;
@@ -133,13 +141,12 @@ void CoverWidget::resizeToWidth(int newWidth) {
 	newHeight += st::profileMarginBottom;
 
 	_dividerTop = newHeight;
-	newHeight += st::profileDividerFill.height();
+	newHeight += st::profileDividerLeft.height();
 
 	newHeight += st::profileBlocksTop;
 
-	resizeDropArea();
-	resize(newWidth, newHeight);
-	update();
+	resizeDropArea(newWidth);
+	return newHeight;
 }
 
 void CoverWidget::refreshNameGeometry(int newWidth) {
@@ -148,7 +155,7 @@ void CoverWidget::refreshNameGeometry(int newWidth) {
 	int nameTop = _userpicButton->y() + st::profileNameTop - st::profileNameLabel.margin.top();
 	int nameWidth = newWidth - infoLeft - st::profileNameLeft;
 	if (_peer->isVerified()) {
-		nameWidth -= st::profileVerifiedCheckPosition.x() + st::profileVerifiedCheck.width();
+		nameWidth -= st::profileVerifiedCheckShift + st::profileVerifiedCheck.width();
 	}
 	int marginsAdd = st::profileNameLabel.margin.left() + st::profileNameLabel.margin.right();
 	_name->resizeToWidth(qMin(nameWidth - marginsAdd, _name->naturalWidth()) + marginsAdd);
@@ -159,9 +166,9 @@ void CoverWidget::refreshNameGeometry(int newWidth) {
 // for each text button. But currently we use only one, so it is done easily:
 // There can be primary + secondary + icon buttons. If primary + secondary fit,
 // then icon is hidden, otherwise secondary is hidden and icon is shown.
-void CoverWidget::moveAndToggleButtons(int newWiddth) {
+void CoverWidget::moveAndToggleButtons(int newWidth) {
 	int buttonLeft = _userpicButton->x() + _userpicButton->width() + st::profileButtonLeft;
-	int buttonsRight = newWiddth - st::profileButtonSkip;
+	int buttonsRight = newWidth - st::profileButtonSkip;
 	for (int i = 0, count = _buttons.size(); i < count; ++i) {
 		auto &button = _buttons.at(i);
 		button.widget->moveToLeft(buttonLeft, st::profileButtonTop);
@@ -204,15 +211,15 @@ void CoverWidget::paintEvent(QPaintEvent *e) {
 	p.drawTextLeft(_statusPosition.x(), _statusPosition.y(), width(), _statusText);
 
 	if (_peer->isVerified()) {
-		st::profileVerifiedCheck.paint(p, QPoint(_name->x() + _name->width(), _name->y()) + st::profileVerifiedCheckPosition, width());
+		st::profileVerifiedCheck.paint(p, _name->x() + _name->width() + st::profileVerifiedCheckShift, _name->y(), width());
 	}
 
 	paintDivider(p);
 }
 
-void CoverWidget::resizeDropArea() {
+void CoverWidget::resizeDropArea(int newWidth) {
 	if (_dropArea) {
-		_dropArea->setGeometry(0, 0, width(), _dividerTop);
+		_dropArea->setGeometry(0, 0, newWidth, _dividerTop);
 	}
 }
 
@@ -247,13 +254,12 @@ bool CoverWidget::mimeDataHasImage(const QMimeData *mimeData) const {
 	auto &url = urls.at(0);
 	if (!url.isLocalFile()) return false;
 
-	auto file = psConvertFileUrl(url);
+	auto file = Platform::FileDialog::UrlToLocal(url);
 
 	QFileInfo info(file);
 	if (info.isDir()) return false;
 
-	quint64 s = info.size();
-	if (s >= MaxUploadDocumentSize) return false;
+	if (info.size() > App::kImageSizeLimit) return false;
 
 	for (auto &ext : cImgExtensions()) {
 		if (file.endsWith(ext, Qt::CaseInsensitive)) {
@@ -276,8 +282,8 @@ void CoverWidget::dragEnterEvent(QDragEnterEvent *e) {
 		} else {
 			subtitle = lang(lng_profile_drop_area_subtitle_channel);
 		}
-		_dropArea = new CoverDropArea(this, title, subtitle);
-		resizeDropArea();
+		_dropArea.create(this, title, subtitle);
+		resizeDropArea(width());
 	}
 	_dropArea->showAnimated();
 	e->setDropAction(Qt::CopyAction);
@@ -286,7 +292,7 @@ void CoverWidget::dragEnterEvent(QDragEnterEvent *e) {
 
 void CoverWidget::dragLeaveEvent(QDragLeaveEvent *e) {
 	if (_dropArea && !_dropArea->hiding()) {
-		_dropArea->hideAnimated(func(this, &CoverWidget::dropAreaHidden));
+		_dropArea->hideAnimated([this](CoverDropArea *area) { dropAreaHidden(area); });
 	}
 }
 
@@ -301,13 +307,13 @@ void CoverWidget::dropEvent(QDropEvent *e) {
 		if (urls.size() == 1) {
 			auto &url = urls.at(0);
 			if (url.isLocalFile()) {
-				img = App::readImage(psConvertFileUrl(url));
+				img = App::readImage(Platform::FileDialog::UrlToLocal(url));
 			}
 		}
 	}
 
 	if (!_dropArea->hiding()) {
-		_dropArea->hideAnimated(func(this, &CoverWidget::dropAreaHidden));
+		_dropArea->hideAnimated([this](CoverDropArea *area) { dropAreaHidden(area); });
 	}
 	e->acceptProposedAction();
 
@@ -315,11 +321,18 @@ void CoverWidget::dropEvent(QDropEvent *e) {
 }
 
 void CoverWidget::paintDivider(Painter &p) {
-	st::profileDividerLeft.paint(p, QPoint(st::lineWidth, _dividerTop), width());
-
-	int toFillLeft = st::lineWidth + st::profileDividerLeft.width();
-	QRect toFill = rtlrect(toFillLeft, _dividerTop, width() - toFillLeft, st::profileDividerFill.height(), width());
-	st::profileDividerFill.fill(p, toFill);
+	auto dividerHeight = st::profileDividerLeft.height();
+	auto dividerLeft = Adaptive::OneColumn() ? 0 : st::lineWidth;
+	auto divider = rtlrect(dividerLeft, _dividerTop, width() - dividerLeft, dividerHeight, width());
+	p.fillRect(divider, st::profileDividerBg);
+	if (!Adaptive::OneColumn()) {
+		st::profileDividerLeft.paint(p, QPoint(dividerLeft, _dividerTop), width());
+	}
+	auto dividerFillLeft = Adaptive::OneColumn() ? 0 : (st::lineWidth + st::profileDividerLeft.width());
+	auto dividerFillTop = rtlrect(dividerFillLeft, _dividerTop, width() - dividerFillLeft, st::profileDividerTop.height(), width());
+	st::profileDividerTop.fill(p, dividerFillTop);
+	auto dividerFillBottom = rtlrect(dividerFillLeft, _dividerTop + dividerHeight - st::profileDividerBottom.height(), width() - dividerFillLeft, st::profileDividerBottom.height(), width());
+	st::profileDividerBottom.fill(p, dividerFillBottom);
 }
 
 void CoverWidget::notifyPeerUpdated(const Notify::PeerUpdate &update) {
@@ -332,7 +345,10 @@ void CoverWidget::notifyPeerUpdated(const Notify::PeerUpdate &update) {
 	if (update.flags & UpdateFlag::NameChanged) {
 		refreshNameText();
 	}
-	if (update.flags & UpdateFlag::UserOnlineChanged) {
+	if (update.flags & UpdateFlag::PhotoChanged) {
+		validatePhoto();
+	}
+	if (update.flags & (UpdateFlag::UserOnlineChanged | UpdateFlag::MembersChanged)) {
 		refreshStatusText();
 	}
 }
@@ -346,8 +362,9 @@ void CoverWidget::refreshStatusText() {
 	if (auto app = App::app()) {
 		if (app->isPhotoUpdating(_peer->id)) {
 			_statusText = lang(lng_settings_uploading_photo);
+			_statusTextIsOnline = false;
 			if (!_cancelPhotoUpload) {
-				_cancelPhotoUpload = new LinkButton(this, lang(lng_cancel), st::btnDefLink);
+				_cancelPhotoUpload.create(this, lang(lng_cancel), st::defaultLinkButton);
 				connect(_cancelPhotoUpload, SIGNAL(clicked()), this, SLOT(onCancelPhotoUpload()));
 				_cancelPhotoUpload->show();
 				_cancelPhotoUpload->moveToLeft(_statusPosition.x() + st::profileStatusFont->width(_statusText) + st::profileStatusFont->spacew, _statusPosition.y());
@@ -438,7 +455,7 @@ void CoverWidget::setChannelButtons() {
 }
 
 void CoverWidget::clearButtons() {
-	auto buttons = createAndSwap(_buttons);
+	auto buttons = base::take(_buttons);
 	for_const (auto button, buttons) {
 		delete button.widget;
 		delete button.replacement;
@@ -448,7 +465,6 @@ void CoverWidget::clearButtons() {
 void CoverWidget::addButton(const QString &text, const char *slot, const style::RoundButton *replacementStyle) {
 	auto &buttonStyle = _buttons.isEmpty() ? st::profilePrimaryButton : st::profileSecondaryButton;
 	auto button = new Ui::RoundButton(this, text, buttonStyle);
-	button->setTextTransform(Ui::RoundButton::TextTransform::ToUpper);
 	connect(button, SIGNAL(clicked()), this, slot);
 	button->show();
 
@@ -475,10 +491,12 @@ void CoverWidget::onShareContact() {
 }
 
 void CoverWidget::onSetPhoto() {
-	QStringList imgExtensions(cImgExtensions());
-	QString filter(qsl("Image files (*") + imgExtensions.join(qsl(" *")) + qsl(");;") + filedialogAllFilesFilter());
+	App::CallDelayed(st::profilePrimaryButton.ripple.hideDuration, this, [this] {
+		QStringList imgExtensions(cImgExtensions());
+		QString filter(qsl("Image files (*") + imgExtensions.join(qsl(" *")) + qsl(");;") + filedialogAllFilesFilter());
 
-	_setPhotoFileQueryId = FileDialog::queryReadFile(lang(lng_choose_images), filter);
+		_setPhotoFileQueryId = FileDialog::queryReadFile(lang(lng_choose_image), filter);
+	});
 }
 
 void CoverWidget::notifyFileQueryUpdated(const FileDialog::QueryUpdate &update) {
@@ -503,13 +521,12 @@ void CoverWidget::notifyFileQueryUpdated(const FileDialog::QueryUpdate &update) 
 
 void CoverWidget::showSetPhotoBox(const QImage &img) {
 	if (img.isNull() || img.width() > 10 * img.height() || img.height() > 10 * img.width()) {
-		Ui::showLayer(new InformBox(lang(lng_bad_photo)));
+		Ui::show(Box<InformBox>(lang(lng_bad_photo)));
 		return;
 	}
 
-	auto box = new PhotoCropBox(img, _peer);
+	auto box = Ui::show(Box<PhotoCropBox>(img, _peer));
 	connect(box, SIGNAL(closed()), this, SLOT(onPhotoUploadStatusChanged()));
-	Ui::showLayer(box);
 }
 
 void CoverWidget::onPhotoUploadStatusChanged(PeerId peerId) {
@@ -521,22 +538,22 @@ void CoverWidget::onPhotoUploadStatusChanged(PeerId peerId) {
 void CoverWidget::onAddMember() {
 	if (_peerChat) {
 		if (_peerChat->count >= Global::ChatSizeMax() && _peerChat->amCreator()) {
-			Ui::showLayer(new ConvertToSupergroupBox(_peerChat));
+			Ui::show(Box<ConvertToSupergroupBox>(_peerChat));
 		} else {
-			Ui::showLayer(new ContactsBox(_peerChat, MembersFilterRecent));
+			Ui::show(Box<ContactsBox>(_peerChat, MembersFilter::Recent));
 		}
 	} else if (_peerChannel && _peerChannel->mgInfo) {
 		MembersAlreadyIn already;
 		for_const (auto user, _peerChannel->mgInfo->lastParticipants) {
 			already.insert(user);
 		}
-		Ui::showLayer(new ContactsBox(_peerChannel, MembersFilterRecent, already));
+		Ui::show(Box<ContactsBox>(_peerChannel, MembersFilter::Recent, already));
 	}
 }
 
 void CoverWidget::onAddBotToGroup() {
 	if (_peerUser && _peerUser->botInfo) {
-		Ui::showLayer(new ContactsBox(_peerUser));
+		Ui::show(Box<ContactsBox>(_peerUser));
 	}
 }
 

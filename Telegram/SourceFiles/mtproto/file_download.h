@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -94,7 +94,7 @@ enum LocalLoadStatus {
 	LocalFailed,
 };
 
-typedef void *TaskId; // no interface, just id
+using TaskId = void*; // no interface, just id
 
 enum LoadFromCloudSetting {
 	LoadFromCloudOrLocal,
@@ -182,12 +182,16 @@ signals:
 protected:
 	void readImage(const QSize &shrinkBox) const;
 
-	FileLoader *_prev, *_next;
-	int32 _priority;
+	FileLoader *_prev = nullptr;
+	FileLoader *_next = nullptr;
+	int _priority = 0;
 	FileLoaderQueue *_queue;
 
-	bool _paused, _autoLoading, _inQueue, _complete;
-	mutable LocalLoadStatus _localStatus;
+	bool _paused = false;
+	bool _autoLoading = false;
+	bool _inQueue = false;
+	bool _complete = false;
+	mutable LocalLoadStatus _localStatus = LocalNotTried;
 
 	virtual bool tryLoadLocal() = 0;
 	virtual void cancelRequests() = 0;
@@ -201,7 +205,7 @@ protected:
 
 	QFile _file;
 	QString _fname;
-	bool _fileIsOpen;
+	bool _fileIsOpen = false;
 
 	LoadToCacheSetting _toCache;
 	LoadFromCloudSetting _fromCloud;
@@ -212,7 +216,7 @@ protected:
 	mtpTypeId _type;
 	LocationType _locationType;
 
-	TaskId _localTaskId;
+	TaskId _localTaskId = 0;
 	mutable QByteArray _imageFormat;
 	mutable QPixmap _imagePixmap;
 
@@ -327,7 +331,7 @@ public:
 
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	void setProxySettings(const QNetworkProxy &proxy);
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 
 	void append(webFileLoader *loader, const QString &url);
 	void stop(webFileLoader *reader);
@@ -360,7 +364,7 @@ private:
 
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	QNetworkProxy _proxySettings;
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 	QNetworkAccessManager _manager;
 	typedef QMap<webFileLoader*, webFileLoaderPrivate*> LoaderPointers;
 	LoaderPointers _loaderPointers;
@@ -396,19 +400,7 @@ void reinitWebLoadManager();
 void stopWebLoadManager();
 
 namespace FileDownload {
-namespace internal {
 
-using ImageLoadedHandler = Function<void>;
-Notify::ConnectionId plainRegisterImageLoadedObserver(ImageLoadedHandler &&handler);
-
-void notifyImageLoaded();
-
-} // namespace internal
-
-template <typename ObserverType>
-void registerImageLoadedObserver(ObserverType *observer, void (ObserverType::*handler)()) {
-	auto connection = internal::plainRegisterImageLoadedObserver(func(observer, handler));
-	Notify::observerRegistered(observer, connection);
-}
+base::Observable<void> &ImageLoaded();
 
 } // namespace FileDownload

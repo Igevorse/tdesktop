@@ -16,18 +16,21 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "core/observer.h"
 #include "ui/filedialog.h"
 
-class FlatLabel;
-class LinkButton;
+namespace style {
+struct RoundButton;
+} // namespace style
 
 namespace Ui {
+class FlatLabel;
 class RoundButton;
+class LinkButton;
 } // namespace Ui
 
 namespace Notify {
@@ -40,14 +43,11 @@ class BackButton;
 class UserpicButton;
 class CoverDropArea;
 
-class CoverWidget final : public TWidget, public Notify::Observer {
+class CoverWidget final : public TWidget, private base::Subscriber {
 	Q_OBJECT
 
 public:
 	CoverWidget(QWidget *parent, PeerData *peer);
-
-	// Count new height for width=newWidth and resize to it.
-	void resizeToWidth(int newWidth);
 
 	void showFinished();
 
@@ -78,6 +78,8 @@ protected:
 	void dragLeaveEvent(QDragLeaveEvent *e) override;
 	void dropEvent(QDropEvent *e) override;
 
+	int resizeGetHeight(int newWidth) override;
+
 private:
 	// Observed notifications.
 	void notifyPeerUpdated(const Notify::PeerUpdate &update);
@@ -88,7 +90,7 @@ private:
 	PhotoData *validatePhoto() const;
 
 	void refreshNameGeometry(int newWidth);
-	void moveAndToggleButtons(int newWiddth);
+	void moveAndToggleButtons(int newWidth);
 	void refreshNameText();
 	void refreshStatusText();
 
@@ -105,7 +107,7 @@ private:
 
 	bool canEditPhoto() const;
 	void showSetPhotoBox(const QImage &img);
-	void resizeDropArea();
+	void resizeDropArea(int newWidth);
 	void dropAreaHidden(CoverDropArea *dropArea);
 	bool mimeDataHasImage(const QMimeData *mimeData) const;
 
@@ -115,11 +117,11 @@ private:
 	ChannelData *_peerChannel;
 	ChannelData *_peerMegagroup;
 
-	ChildWidget<UserpicButton> _userpicButton;
-	ChildWidget<CoverDropArea> _dropArea = { nullptr };
+	object_ptr<UserpicButton> _userpicButton;
+	object_ptr<CoverDropArea> _dropArea = { nullptr };
 
-	ChildWidget<FlatLabel> _name;
-	ChildWidget<LinkButton> _cancelPhotoUpload = { nullptr };
+	object_ptr<Ui::FlatLabel> _name;
+	object_ptr<Ui::LinkButton> _cancelPhotoUpload = { nullptr };
 
 	QPoint _statusPosition;
 	QString _statusText;

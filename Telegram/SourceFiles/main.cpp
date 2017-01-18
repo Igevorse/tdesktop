@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "application.h"
@@ -28,6 +28,7 @@ int main(int argc, char *argv[]) {
 #ifndef Q_OS_MAC // Retina display support is working fine, others are not.
 	QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling, true);
 #endif // Q_OS_MAC
+	QCoreApplication::setApplicationName(qsl("TelegramDesktop"));
 
 	settingsParseArgs(argc, argv);
 	if (cLaunchMode() == LaunchModeFixPrevious) {
@@ -57,7 +58,7 @@ int main(int argc, char *argv[]) {
 		DEBUG_LOG(("Application Info: executing updater to install update..."));
 		psExecUpdater();
 	} else
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 	if (cRestarting()) {
 		DEBUG_LOG(("Application Info: executing Telegram, because of restart..."));
 		psExecTelegram();

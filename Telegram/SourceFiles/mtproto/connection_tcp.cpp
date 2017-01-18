@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
@@ -298,7 +298,7 @@ void AbstractTCPConnection::tcpSend(mtpBuffer &buffer) {
 		// prepare decryption key/iv
 		char reversed[48];
 		memcpy(reversed, nonce + 8, sizeof(reversed));
-		std::reverse(reversed, reversed + arraysize(reversed));
+		std::reverse(reversed, reversed + base::array_size(reversed));
 		memcpy(_receiveKey, reversed, CTRState::KeySize);
 		memcpy(_receiveState.ivec, reversed + CTRState::KeySize, CTRState::IvecSize);
 

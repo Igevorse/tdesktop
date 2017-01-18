@@ -16,7 +16,7 @@
       - [Building libraries](#building-libraries)
     + [FFmpeg](#ffmpeg)
       - [Building libraries](#building-libraries-1)
-    + [Qt 5.6.0, slightly patched](#qt-560-slightly-patched)
+    + [Qt 5.6.2, slightly patched](#qt-560-slightly-patched)
       - [Apply the patch](#apply-the-patch)
       - [Install Windows SDKs](#install-windows-sdks)
       - [Building library](#building-library-4)
@@ -28,21 +28,27 @@
 
 ## Prepare folder
 
-Choose a folder for the future build, for example **D:\TBuild\**. There you will have two folders, **Libraries** for third-party libs and **tdesktop** (or **tdesktop-master**) for the app.
+Choose a folder for the future build, for example **D:\\TBuild\\**. There you will have two folders, **Libraries** for third-party libs and **tdesktop** for the app.
+
+All commands (if not stated otherwise) will be launched from **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder).
 
 ## Clone source code
 
-By git – in [Git Bash](http://git-scm.com/downloads) go to **/d/tbuild** and run
+Go to **D:\\TBuild**
+
+    D:
+    cd TBuild
+
+and run
 
     git clone https://github.com/telegramdesktop/tdesktop.git
-
-or download in ZIP and extract to **D:\TBuild\**, rename **tdesktop-master** to **tdesktop** to have **D:\TBuild\tdesktop\Telegram.sln** solution
+    mkdir Libraries
 
 ## Prepare libraries
 
 ### OpenSSL
 
-Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder), go to **D:\\TBuild\\Libraries** and run
+Go to **D:\\TBuild\\Libraries** and run
 
     git clone https://github.com/openssl/openssl.git
     cd openssl
@@ -60,16 +66,15 @@ Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu >
     nmake -f ms\nt.mak
     nmake -f ms\nt.mak install
 
-
 ### LZMA SDK 9.20
 
 http://www.7-zip.org/sdk.html > Download [**LZMA SDK (C, C++, C#, Java)** 9.20](http://downloads.sourceforge.net/sevenzip/lzma920.tar.bz2)
 
-Extract to **D:\TBuild\Libraries**
+Extract to **D:\\TBuild\\Libraries**
 
 #### Building library
 
-* Open in VS2015 **D:\TBuild\Libraries\lzma\C\Util\LzmaLib\LzmaLib.dsw** > One-way upgrade – **OK**
+* Open in VS2015 **D:\\TBuild\\Libraries\\lzma\\C\\Util\\LzmaLib\\LzmaLib.dsw** > One-way upgrade – **OK**
 * For **Debug** and **Release** configurations
   * LzmaLib Properties > General > Configuration Type = **Static library (.lib)** – **Apply**
   * LzmaLib Properties > Librarian > General > Target Machine = **MachineX86 (/MACHINE:X86)** – **OK**
@@ -83,11 +88,11 @@ Extract to **D:\TBuild\Libraries**
 
 http://www.zlib.net/ > Download [**zlib source code, version 1.2.8, zipfile format**](http://zlib.net/zlib128.zip)
 
-Extract to **D:\\TBuild\\Libraries\\**
+Extract to **D:\\TBuild\\Libraries**
 
 #### Building library
 
-* Open in VS2015 **D:\TBuild\Libraries\zlib-1.2.8\contrib\vstudio\vc11\zlibvc.sln** > One-way upgrade – **OK**
+* Open in VS2015 **D:\\TBuild\\Libraries\\zlib-1.2.8\\contrib\\vstudio\\vc11\\zlibvc.sln** > One-way upgrade – **OK**
 * We are interested only in **zlibstat** project, but it depends on some custom pre-build step, so build all
 * For **Debug** configuration
   * zlibstat Properties > C/C++ > Code Generation > Runtime Library = **Multi-threaded Debug (/MTd)** – **OK**
@@ -98,57 +103,55 @@ Extract to **D:\\TBuild\\Libraries\\**
 
 ### libexif 0.6.20
 
-Get sources from https://github.com/telegramdesktop/libexif-0.6.20, by git – in [Git Bash](http://git-scm.com/downloads) go to **/d/tbuild/libraries** and run
+Go to **D:\\TBuild\\Libraries** and run
 
     git clone https://github.com/telegramdesktop/libexif-0.6.20.git
 
-or download in ZIP and extract to **D:\TBuild\Libraries\**, rename **libexif-0.6.20-master** to **libexif-0.6.20** to have **D:\TBuild\Libraries\libexif-0.6.20\win32\lib_exif.sln** solution
-
 #### Building library
 
-* Open in VS2015 **D:\TBuild\Libraries\libexif-0.6.20\win32\lib_exif.sln**
+* Open in VS2015 **D:\\TBuild\\Libraries\\libexif-0.6.20\\win32\\lib_exif.sln**
 * Build Debug configuration
 * Build Release configuration
 
 ### OpenAL Soft, slightly patched
 
-Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder), go to **D:\\TBuild\\Libraries** and run
+Go to **D:\\TBuild\\Libraries** and run
 
     git clone git://repo.or.cz/openal-soft.git
     cd openal-soft
-    git checkout 90349b38
+    git checkout 18bb46163af
     git apply ./../../tdesktop/Telegram/Patches/openal.diff
 
 #### Building library
 
 * Install [CMake](http://www.cmake.org/)
-* Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder), go to **D:\TBuild\Libraries\openal-soft\build\** and run
+* Go to **D:\\TBuild\\Libraries\\openal-soft\\build** and run
 
-        cmake -G "Visual Studio 14 2015" -D LIBTYPE:STRING=STATIC -D FORCE_STATIC_VCRT:STRING=ON ..
+<!-- -->
 
-* Open in VS2015 **D:\TBuild\Libraries\openal-soft\build\OpenAL.sln** and build Debug and Release configurations
+    cmake -G "Visual Studio 14 2015" -D LIBTYPE:STRING=STATIC -D FORCE_STATIC_VCRT:STRING=ON ..
+
+* Open in VS2015 **D:\\TBuild\\Libraries\\openal-soft\\build\\OpenAL.sln** and build Debug and Release configurations
 
 ### Opus codec
 
-Get sources by git – in [Git Bash](http://git-scm.com/downloads) go to **/d/tbuild/libraries** and run
+Go to **D:\\TBuild\\Libraries** and run
 
     git clone https://github.com/telegramdesktop/opus.git
 
-to have **D:\TBuild\Libraries\opus\win32**
-
 #### Building libraries
 
-* Open in VS2015 **D:\TBuild\Libraries\opus\win32\VS2010\opus.sln**
+* Open in VS2015 **D:\\TBuild\\Libraries\\opus\\win32\\VS2010\\opus.sln**
 * Build Debug configuration
 * Build Release configuration (it will be required in **FFmpeg** build!)
 
 ### FFmpeg
 
-Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder) and run
+Go to **D:\\TBuild\\Libraries** and run
 
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
-    git checkout release/3.1
+    git checkout release/3.2
 
 http://msys2.github.io/ > Download [msys2-x86_64-20150512.exe](http://sourceforge.net/projects/msys2/files/Base/x86_64/msys2-x86_64-20150512.exe/download) and install to **D:\\msys64**
 
@@ -156,7 +159,7 @@ http://msys2.github.io/ > Download [msys2-x86_64-20150512.exe](http://sourceforg
 
 Download [yasm for Win64](http://www.tortall.net/projects/yasm/releases/yasm-1.3.0-win64.exe) from http://yasm.tortall.net/Download.html, rename **yasm-1.3.0-win64.exe** to **yasm.exe** and place it to your Visual C++ **bin** directory, like **\\Program Files (x86)\\Microsoft Visual Studio 14\\VC\\bin\\**
 
-Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder), go to **D:\\msys64\\** and launch **msys2_shell.bat**, there run
+While still running the VS2015 x86 Native Tools Command Prompt, go to **D:\\msys64** and launch **msys2_shell.bat**. There run
 
     PATH="/c/Program Files (x86)/Microsoft Visual Studio 14.0/VC/BIN:$PATH"
 
@@ -174,29 +177,24 @@ Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu >
     make
     make install
 
-### Qt 5.6.0, slightly patched
+### Qt 5.6.2, slightly patched
 
 * Install Python 3.3.2 from https://www.python.org/download/releases/3.3.2 > [**Windows x86 MSI Installer (3.3.2)**](https://www.python.org/ftp/python/3.3.2/python-3.3.2.msi)
-* Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder)
+* Go to **D:\\TBuild\\Libraries** and run
 
-There go to Libraries directory
+<!-- -->
 
-    D:
-    cd TBuild\Libraries
-
-and run
-
-    git clone git://code.qt.io/qt/qt5.git qt5_6_0
-    cd qt5_6_0
+    git clone git://code.qt.io/qt/qt5.git qt5_6_2
+    cd qt5_6_2
     git checkout 5.6
     perl init-repository --module-subset=qtbase,qtimageformats
-    git checkout v5.6.0
-    cd qtimageformats && git checkout v5.6.0 && cd ..
-    cd qtbase && git checkout v5.6.0 && cd ..
+    git checkout v5.6.2
+    cd qtimageformats && git checkout v5.6.2 && cd ..
+    cd qtbase && git checkout v5.6.2 && cd ..
 
 #### Apply the patch
 
-    cd qtbase && git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_0.diff && cd ..
+    cd qtbase && git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_2.diff && cd ..
 
 #### Install Windows SDKs
 
@@ -205,6 +203,8 @@ If you didn't install Windows SDKs before, you need to install them now. To inst
 If you already have Windows SDKs then find the library folder and correct it at configure's command below (like **C:\Program Files (x86)\Windows Kits\8.0\Lib\win8\um\x86**).
 
 #### Building library
+
+Go to **D:\\TBuild\\Libraries\\qt5_6_2** and run
 
     configure -debug-and-release -force-debug-info -opensource -confirm-license -static -I "D:\TBuild\Libraries\openssl\Release\include" -L "C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Lib" -l Gdi32 -no-opengl -openssl-linked OPENSSL_LIBS_DEBUG="D:\TBuild\Libraries\openssl_debug\Debug\lib\ssleay32.lib D:\TBuild\Libraries\openssl_debug\Debug\lib\libeay32.lib" OPENSSL_LIBS_RELEASE="D:\TBuild\Libraries\openssl\Release\lib\ssleay32.lib D:\TBuild\Libraries\openssl\Release\lib\libeay32.lib" -mp -nomake examples -nomake tests -platform win32-msvc2015
     nmake
@@ -225,14 +225,9 @@ Breakpad is a set of client and server components which implement a crash-report
 #### Install
 
 * Install Python 2.7.12 from https://www.python.org/downloads/release/python-2712/ > [**Windows x86 MSI installer**](https://www.python.org/ftp/python/2.7.12/python-2.7.12.msi). Make sure that python is added to your `PATH` (there is an option for this in the python installer).
-* Open **VS2015 x86 Native Tools Command Prompt.bat** (should be in **Start Menu > Programs > Visual Studio 2015** menu folder)
+* Go to **D:\\TBuild\\Libraries** and run
 
-There go to Libraries directory
-
-    D:
-    cd TBuild\Libraries
-
-and run
+<!-- -->
 
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
     cd depot_tools
@@ -244,21 +239,38 @@ and run
     ..\depot_tools\gclient sync
     xcopy src\src\* src /s /i
 
-
 #### Build
 
-* Open in VS2015 **D:\TBuild\Libraries\breakpad\src\client\windows\breakpad_client.sln**
-* Change "Treat WChar_t As Built in Type" to "No" in all projects & configurations
-* Change "Treat Warnings As Errors" to "No" in all projects & configurations
+* Open in VS2015 **D:\\TBuild\\Libraries\\breakpad\\src\\client\\windows\\breakpad_client.sln**
+* Change "Treat WChar_t As Built in Type" to "No" in all projects & configurations (should be in project>>properties>>C/C++>>Language)
+* Change "Treat Warnings As Errors" to "No" in all projects & configurations (should be in project>>properties>>C/C++>>General)
 * Build Debug configuration
 * Build Release configuration
 
 ## Building Telegram Desktop
 
+#### Setup GYP/Ninja and generate VS solution
+
+* Download [Ninja binaries](https://github.com/ninja-build/ninja/releases/download/v1.7.1/ninja-win.zip) and unpack them to **D:\\TBuild\\Libraries\\ninja** to have **D:\\TBuild\\Libraries\\ninja\\ninja.exe**
+* Go to **D:\\TBuild\\Libraries** and run
+
+<!-- -->
+
+    git clone https://chromium.googlesource.com/external/gyp
+    SET PATH=%PATH%;D:\TBuild\Libraries\gyp;D:\TBuild\Libraries\ninja;
+    cd ..\tdesktop\Telegram
+    gyp\refresh.bat
+
+#### Configure VS
+
 * Launch VS2015 for configuring Qt5Package
 * QT5 > Qt Options > Add
-  * Version name: **Qt 5.6.0 Win32**
-  * Path: **D:\TBuild\Libraries\qt5_6_0\qtbase**
-* Default Qt/Win version: **Qt 5.6.0 Win32** – **OK** - You may need to restart Visual Studio for this to take effect.
+  * Version name: **Qt 5.6.22Win32**
+  * Path: **D:\TBuild\Libraries\qt5_6_2\qtbase**
+* Default Qt/Win version: **Qt 5.6.2 Win32** – **OK** - You may need to restart Visual Studio for this to take effect.
+
+#### Build the project
+
 * File > Open > Project/Solution > **D:\TBuild\tdesktop\Telegram.sln**
-* Build \ Build Solution (Debug and Release configurations)
+* Select Telegram project and press Build > Build Telegram (Debug and Release configurations)
+* The result Telegram.exe will be located in **D:\TBuild\tdesktop\out\Debug** (and **Release**)

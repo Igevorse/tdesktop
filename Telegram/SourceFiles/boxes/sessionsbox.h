@@ -16,107 +16,101 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-#include "abstractbox.h"
+#include "boxes/abstractbox.h"
+#include "core/single_timer.h"
 
 class ConfirmBox;
 
-struct SessionData {
-	uint64 hash;
+namespace Ui {
+class IconButton;
+class LinkButton;
+} // namespace Ui
 
-	int32 activeTime;
-	int32 nameWidth, activeWidth, infoWidth, ipWidth;
-	QString name, active, info, ip;
-};
-typedef QList<SessionData> SessionsList;
-
-class SessionsInner : public TWidget, public RPCSender {
+class SessionsBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
+	SessionsBox(QWidget*);
 
-	SessionsInner(SessionsList *list, SessionData *current);
+protected:
+	void prepare() override;
 
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+
+private slots:
+	void onOneTerminated();
+	void onAllTerminated();
+	void onTerminateAll();
+	void onShortPollAuthorizations();
+	void onCheckNewAuthorization();
+
+private:
+	void setLoading(bool loading);
+	struct Data {
+		uint64 hash;
+
+		int32 activeTime;
+		int32 nameWidth, activeWidth, infoWidth, ipWidth;
+		QString name, active, info, ip;
+	};
+	using List = QList<Data>;
+
+	void gotAuthorizations(const MTPaccount_Authorizations &result);
+
+	bool _loading = false;
+
+	Data _current;
+	List _list;
+
+	class Inner;
+	QPointer<Inner> _inner;
+
+	object_ptr<SingleTimer> _shortPollTimer;
+	mtpRequestId _shortPollRequest = 0;
+
+};
+
+// This class is hold in header because it requires Qt preprocessing.
+class SessionsBox::Inner : public TWidget, public RPCSender {
+	Q_OBJECT
+
+public:
+	Inner(QWidget *parent, SessionsBox::List *list, SessionsBox::Data *current);
 
 	void listUpdated();
 
-	~SessionsInner();
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
 signals:
-
 	void oneTerminated();
 	void allTerminated();
 	void terminateAll();
 
 public slots:
-
 	void onTerminate();
-	void onTerminateSure();
 	void onTerminateAll();
-	void onTerminateAllSure();
-	void onNoTerminateBox(QObject *obj);
 
 private:
-	
 	void terminateDone(uint64 hash, const MTPBool &result);
 	bool terminateFail(uint64 hash, const RPCError &error);
 
 	void terminateAllDone(const MTPBool &res);
 	bool terminateAllFail(const RPCError &error);
 
-	SessionsList *_list;
-	SessionData *_current;
+	SessionsBox::List *_list;
+	SessionsBox::Data *_current;
 
-	typedef QMap<uint64, IconedButton*> TerminateButtons;
+	typedef QMap<uint64, Ui::IconButton*> TerminateButtons;
 	TerminateButtons _terminateButtons;
 
-	uint64 _terminating;
-	LinkButton _terminateAll;
-	ConfirmBox *_terminateBox;
-
-};
-
-class SessionsBox : public ScrollableBox, public RPCSender {
-	Q_OBJECT
-
-public:
-
-	SessionsBox();
-	void resizeEvent(QResizeEvent *e);
-	void paintEvent(QPaintEvent *e);
-
-public slots:
-
-	void onOneTerminated();
-	void onAllTerminated();
-	void onTerminateAll();
-	void onShortPollAuthorizations();
-	void onNewAuthorization();
-
-protected:
-
-	void hideAll();
-	void showAll();
-
-private:
-
-	void gotAuthorizations(const MTPaccount_Authorizations &result);
-
-	bool _loading;
-
-	SessionData _current;
-	SessionsList _list;
-
-	SessionsInner _inner;
-	ScrollableBoxShadow _shadow;
-	BoxButton _done;
-
-	SingleTimer _shortPollTimer;
-	mtpRequestId _shortPollRequest;
+	object_ptr<Ui::LinkButton> _terminateAll;
+	QPointer<ConfirmBox> _terminateBox;
 
 };

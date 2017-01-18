@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "codegen/style/processor.h"
 
@@ -25,7 +25,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "codegen/common/cpp_file.h"
 #include "codegen/style/parsed_file.h"
 #include "codegen/style/generator.h"
-#include "codegen/style/sprite_generator.h"
 
 namespace codegen {
 namespace style {
@@ -50,14 +49,7 @@ int Processor::launch() {
 	}
 
 	auto module = parser_->getResult();
-	if (options_.rebuildDependencies) {
-		bool result = module->enumIncludes([this](const structure::Module &included) -> bool {
-			return write(included);
-		});
-		if (!result) {
-			return -1;
-		}
-	} else if (!write(*module)) {
+	if (!write(*module)) {
 		return -1;
 	}
 
@@ -65,6 +57,7 @@ int Processor::launch() {
 }
 
 bool Processor::write(const structure::Module &module) const {
+	bool forceReGenerate = false;
 	QDir dir(options_.outputPath);
 	if (!dir.mkpath(".")) {
 		common::logError(kErrorCantWritePath, "Command Line") << "can not open path for writing: " << dir.absolutePath().toStdString();
@@ -72,9 +65,8 @@ bool Processor::write(const structure::Module &module) const {
 	}
 
 	QFileInfo srcFile(module.filepath());
-	QString dstFilePath = dir.absolutePath() + '/' + destFileBaseName(module);
+	QString dstFilePath = dir.absolutePath() + '/' + (options_.isPalette ? "palette" : destFileBaseName(module));
 
-	bool forceReGenerate = false;// !options_.rebuildDependencies;
 	common::ProjectInfo project = {
 		"codegen_style",
 		srcFile.fileName(),
@@ -82,19 +74,17 @@ bool Processor::write(const structure::Module &module) const {
 		forceReGenerate
 	};
 
-	SpriteGenerator spriteGenerator(module, forceReGenerate);
-	if (!spriteGenerator.writeSprites()) {
-		return false;
-	}
-
-	Generator generator(module, dstFilePath, project);
+	Generator generator(module, dstFilePath, project, options_.isPalette);
 	if (!generator.writeHeader()) {
 		return false;
 	}
 	if (!generator.writeSource()) {
 		return false;
 	}
-
+	auto themePath = srcFile.absoluteDir().absolutePath() + "/default.tdesktop-theme";
+	if (options_.isPalette && !generator.writeSampleTheme(themePath)) {
+		return false;
+	}
 	return true;
 }
 

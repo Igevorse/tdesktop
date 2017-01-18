@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
@@ -63,67 +63,55 @@ void myEnsureResized(QWidget *target) {
 	}
 }
 
-QPixmap myGrab(TWidget *target, QRect rect) {
+QPixmap myGrab(TWidget *target, QRect rect, QColor bg) {
 	myEnsureResized(target);
 	if (rect.isNull()) rect = target->rect();
 
-    QPixmap result(rect.size() * cRetinaFactor());
+    auto result = QPixmap(rect.size() * cIntRetinaFactor());
     result.setDevicePixelRatio(cRetinaFactor());
-    result.fill(Qt::transparent);
+	if (!target->testAttribute(Qt::WA_OpaquePaintEvent)) {
+		result.fill(bg);
+	}
 
 	target->grabStart();
-    target->render(&result, QPoint(), QRegion(rect), QWidget::DrawChildren | QWidget::IgnoreMask);
+	target->render(&result, QPoint(0, 0), rect, QWidget::DrawChildren | QWidget::IgnoreMask);
 	target->grabFinish();
 
-	return result;
+	return std_::move(result);
 }
 
-enum class Mode {
-	Shown,
-	ShownFast,
-	Hidden,
-	HiddenFast
-};
-void ToggleableShadow::setMode(Mode mode) {
-	if (mode == Mode::ShownFast || mode == Mode::HiddenFast) {
-		if (!_a_opacity.isNull()) {
-			_a_opacity.finish();
-			update();
-		}
-	}
-	if (_shown && (mode == Mode::Hidden || mode == Mode::HiddenFast)) {
-		_shown = false;
-		if (mode == Mode::Hidden) {
-			if (_a_opacity.isNull()) {
-				_a_opacity.setup(1., func(this, &ToggleableShadow::repaintCallback));
-			}
-			_a_opacity.start(0., st::shadowToggleDuration);
-		}
-	} else if (!_shown && (mode == Mode::Shown || mode == Mode::ShownFast)) {
-		_shown = true;
-		if (mode == Mode::Shown) {
-			if (_a_opacity.isNull()) {
-				_a_opacity.setup(0., func(this, &ToggleableShadow::repaintCallback));
-			}
-			_a_opacity.start(1., st::shadowToggleDuration);
-		}
-	}
-}
+QImage myGrabImage(TWidget *target, QRect rect, QColor bg) {
+	myEnsureResized(target);
+	if (rect.isNull()) rect = target->rect();
 
-void ToggleableShadow::paintEvent(QPaintEvent *e) {
-	Painter p(this);
-	if (_a_opacity.animating(getms())) {
-		p.setOpacity(_a_opacity.current());
-	} else if (!_shown) {
-		return;
+	auto result = QImage(rect.size() * cIntRetinaFactor(), QImage::Format_ARGB32_Premultiplied);
+	result.setDevicePixelRatio(cRetinaFactor());
+	if (!target->testAttribute(Qt::WA_OpaquePaintEvent)) {
+		result.fill(bg);
 	}
-	p.fillRect(e->rect(), _color);
+
+	target->grabStart();
+	target->render(&result, QPoint(0, 0), rect, QWidget::DrawChildren | QWidget::IgnoreMask);
+	target->grabFinish();
+
+	return std_::move(result);
 }
 
 void sendSynteticMouseEvent(QWidget *widget, QEvent::Type type, Qt::MouseButton button, const QPoint &globalPoint) {
-	auto windowHandle = widget->window()->windowHandle();
-	auto localPoint = windowHandle->mapFromGlobal(globalPoint);
-	QMouseEvent ev(type, localPoint, localPoint, globalPoint, button, QGuiApplication::mouseButtons() | button, QGuiApplication::keyboardModifiers(), Qt::MouseEventSynthesizedByApplication);
-	ev.setTimestamp(getms());
-	QGuiApplication::sendEvent(windowHandle, &ev);
+	if (auto windowHandle = widget->window()->windowHandle()) {
+		auto localPoint = windowHandle->mapFromGlobal(globalPoint);
+		QMouseEvent ev(type
+			, localPoint
+			, localPoint
+			, globalPoint
+			, button
+			, QGuiApplication::mouseButtons() | button
+			, QGuiApplication::keyboardModifiers()
+#ifndef OS_MAC_OLD
+			, Qt::MouseEventSynthesizedByApplication
+#endif // OS_MAC_OLD
+		);
+		ev.setTimestamp(getms());
+		QGuiApplication::sendEvent(windowHandle, &ev);
+	}
 }

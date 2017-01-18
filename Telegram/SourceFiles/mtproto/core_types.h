@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -59,7 +59,7 @@ class mtpRequestData : public mtpBuffer {
 public:
 	// in toSend: = 0 - must send in container, > 0 - can send without container
 	// in haveSent: = 0 - container with msgIds, > 0 - when was sent
-	uint64 msDate;
+	TimeMs msDate;
 
 	mtpRequestId requestId;
 	mtpRequest after;
@@ -141,35 +141,6 @@ public:
 typedef QMap<mtpRequestId, mtpRequest> mtpPreRequestMap;
 typedef QMap<mtpMsgId, mtpRequest> mtpRequestMap;
 typedef QMap<mtpMsgId, bool> mtpMsgIdsSet;
-class mtpMsgIdsMap : public QMap<mtpMsgId, bool> {
-public:
-	typedef QMap<mtpMsgId, bool> ParentType;
-
-	bool insert(const mtpMsgId &k, bool v) {
-		ParentType::const_iterator i = constFind(k);
-		if (i == cend()) {
-			if (size() >= MTPIdsBufferSize && k < min()) {
-				MTP_LOG(-1, ("No need to handle - %1 < min = %2").arg(k).arg(min()));
-				return false;
-			} else {
-				ParentType::insert(k, v);
-				return true;
-			}
-		} else {
-			MTP_LOG(-1, ("No need to handle - %1 already is in map").arg(k));
-			return false;
-		}
-	}
-
-	mtpMsgId min() const {
-		return isEmpty() ? 0 : cbegin().key();
-	}
-
-	mtpMsgId max() const {
-		ParentType::const_iterator e(cend());
-		return isEmpty() ? 0 : (--e).key();
-	}
-};
 
 class mtpRequestIdsMap : public QMap<mtpMsgId, mtpRequestId> {
 public:
@@ -199,27 +170,9 @@ public:
 	}
 };
 
-class mtpErrorUninitialized : public Exception {
-public:
-	mtpErrorUninitialized() : Exception("MTP Uninitialized variable write attempt") {
-	}
-};
-
 class mtpErrorBadTypeId : public Exception {
 public:
 	mtpErrorBadTypeId(mtpTypeId typeId, const QString &type) : Exception(QString("MTP Bad type id %1 passed to constructor of %2").arg(typeId).arg(type)) {
-	}
-};
-
-class mtpErrorWrongTypeId : public Exception {
-public:
-	mtpErrorWrongTypeId(mtpTypeId typeId, mtpTypeId required) : Exception(QString("MTP Wrong type id %1 for this data conversion, must be %2").arg(typeId).arg(required)) {
-	}
-};
-
-class mtpErrorKeyNotReady : public Exception {
-public:
-	mtpErrorKeyNotReady(const QString &method) : Exception(QString("MTP Auth key is used in %1 without being created").arg(method)) {
 	}
 };
 
@@ -665,7 +618,7 @@ class MTPDstring : public mtpDataImpl<MTPDstring> {
 public:
 	MTPDstring() {
 	}
-	MTPDstring(const string &val) : v(val) {
+	MTPDstring(const std::string &val) : v(val) {
 	}
 	MTPDstring(const QString &val) : v(val.toUtf8().constData()) {
 	}
@@ -674,7 +627,7 @@ public:
 	MTPDstring(const char *val) : v(val) {
 	}
 
-	string v;
+	std::string v;
 };
 
 class MTPstring : private mtpDataOwner {
@@ -686,12 +639,12 @@ public:
 	}
 
 	MTPDstring &_string() {
-		if (!data) throw mtpErrorUninitialized();
+		t_assert(data != nullptr);
 		split();
 		return *(MTPDstring*)data;
 	}
 	const MTPDstring &c_string() const {
-		if (!data) throw mtpErrorUninitialized();
+		t_assert(data != nullptr);
 		return *(const MTPDstring*)data;
 	}
 
@@ -755,13 +708,13 @@ private:
 	explicit MTPstring(MTPDstring *_data) : mtpDataOwner(_data) {
 	}
 
-	friend MTPstring MTP_string(const string &v);
+	friend MTPstring MTP_string(const std::string &v);
 	friend MTPstring MTP_string(const QString &v);
 	friend MTPstring MTP_string(const char *v);
 
 	friend MTPstring MTP_bytes(const QByteArray &v);
 };
-inline MTPstring MTP_string(const string &v) {
+inline MTPstring MTP_string(const std::string &v) {
 	return MTPstring(new MTPDstring(v));
 }
 inline MTPstring MTP_string(const QString &v) {
@@ -788,12 +741,12 @@ inline bool operator!=(const MTPstring &a, const MTPstring &b) {
 }
 
 inline QString qs(const MTPstring &v) {
-	const string &d(v.c_string().v);
+	auto &d = v.c_string().v;
 	return QString::fromUtf8(d.data(), d.length());
 }
 
 inline QByteArray qba(const MTPstring &v) {
-	const string &d(v.c_string().v);
+	auto &d = v.c_string().v;
 	return QByteArray(d.data(), d.length());
 }
 
@@ -823,12 +776,12 @@ public:
 	}
 
 	MTPDvector<T> &_vector() {
-		if (!data) throw mtpErrorUninitialized();
+		t_assert(data != nullptr);
 		split();
 		return *(MTPDvector<T>*)data;
 	}
 	const MTPDvector<T> &c_vector() const {
-		if (!data) throw mtpErrorUninitialized();
+		t_assert(data != nullptr);
 		return *(const MTPDvector<T>*)data;
 	}
 
@@ -981,8 +934,6 @@ inline bool mtpIsFalse(const MTPBool &v) {
 	return !mtpIsTrue(v);
 }
 
-#define CHECK_MTP_SCHEME_AND_CLIENT_FLAGS_CONFLICT(Type) \
-
 // we must validate that MTProto scheme flags don't intersect with client side flags
 // and define common bit operators which allow use Type_ClientFlag together with Type::Flag
 #define DEFINE_MTP_CLIENT_FLAGS(Type) \
@@ -990,12 +941,10 @@ static_assert(static_cast<int32>(Type::Flag::MAX_FIELD) < static_cast<int32>(Typ
 	"MTProto flags conflict with client side flags!"); \
 inline Type::Flags qFlags(Type##_ClientFlag v) { return Type::Flags(static_cast<int32>(v)); } \
 inline Type::Flags operator&(Type::Flags i, Type##_ClientFlag v) { return i & qFlags(v); } \
-inline Type::Flags operator&(Type::Flag i, Type##_ClientFlag v) { return qFlags(i) & v; } \
 inline Type::Flags operator&(Type##_ClientFlag i, Type##_ClientFlag v) { return qFlags(i) & v; } \
-inline Type::Flags operator&(Type##_ClientFlag i, Type::Flag v) { return qFlags(i) & v; } \
 inline Type::Flags &operator&=(Type::Flags &i, Type##_ClientFlag v) { return i &= qFlags(v); } \
 inline Type::Flags operator|(Type::Flags i, Type##_ClientFlag v) { return i | qFlags(v); } \
-inline Type::Flags operator|(Type::Flag i, Type##_ClientFlag v) { return qFlags(i) | v; } \
+inline Type::Flags operator|(Type::Flag i, Type##_ClientFlag v) { return i | qFlags(v); } \
 inline Type::Flags operator|(Type##_ClientFlag i, Type##_ClientFlag v) { return qFlags(i) | v; } \
 inline Type::Flags operator|(Type##_ClientFlag i, Type::Flag v) { return qFlags(i) | v; } \
 inline Type::Flags &operator|=(Type::Flags &i, Type##_ClientFlag v) { return i |= qFlags(v); } \
@@ -1021,17 +970,20 @@ enum class MTPDmessage_ClientFlag : int32 {
 	// message is attached to previous one when displaying the history
 	f_attach_to_previous = (1 << 25),
 
+	// message is attached to next one when displaying the history
+	f_attach_to_next = (1 << 24),
+
 	// message was sent from inline bot, need to re-set media when sent
-	f_from_inline_bot = (1 << 24),
+	f_from_inline_bot = (1 << 23),
 
 	// message has a switch inline keyboard button, need to return to inline
-	f_has_switch_inline_button = (1 << 23),
+	f_has_switch_inline_button = (1 << 22),
 
 	// message is generated on the client side and should be unread
-	f_clientside_unread = (1 << 22),
+	f_clientside_unread = (1 << 21),
 
 	// update this when adding new client side flags
-	MIN_FIELD = (1 << 22),
+	MIN_FIELD = (1 << 21),
 };
 DEFINE_MTP_CLIENT_FLAGS(MTPDmessage)
 

@@ -16,12 +16,15 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "ui/twidget.h"
-#include "ui/boxshadow.h"
+
+namespace Ui {
+class ScrollArea;
+} // namespace Ui
 
 namespace internal {
 
@@ -39,14 +42,10 @@ class FieldAutocomplete final : public TWidget {
 public:
 	FieldAutocomplete(QWidget *parent);
 
-	void fastHide();
-
 	bool clearFilteredBotCommands();
 	void showFiltered(PeerData *peer, QString query, bool addInlineBots);
 	void showStickers(EmojiPtr emoji);
 	void setBoundings(QRect boundings);
-
-	void step_appearance(float64 ms, bool timer);
 
 	const QString &filter() const;
 	ChatData *chat() const;
@@ -75,6 +74,8 @@ public:
 		return rect().contains(QRect(mapFromGlobal(globalRect.topLeft()), globalRect.size()));
 	}
 
+	void hideFast();
+
 	~FieldAutocomplete();
 
 signals:
@@ -86,13 +87,15 @@ signals:
 	void moderateKeyActivate(int key, bool *outHandled) const;
 
 public slots:
-	void hideStart();
-	void hideFinish();
+	void showAnimated();
+	void hideAnimated();
 
-	void showStart();
+protected:
+	void paintEvent(QPaintEvent *e) override;
 
 private:
-	void paintEvent(QPaintEvent *e) override;
+	void animationCallback();
+	void hideFinish();
 
 	void updateFiltered(bool resetScroll = false);
 	void recount(bool resetScroll = false);
@@ -105,12 +108,12 @@ private:
 
 	void rowsUpdated(const internal::MentionRows &mrows, const internal::HashtagRows &hrows, const internal::BotCommandRows &brows, const StickerPack &srows, bool resetScroll);
 
-	ChildWidget<ScrollArea> _scroll;
-	ChildWidget<internal::FieldAutocompleteInner> _inner;
+	object_ptr<Ui::ScrollArea> _scroll;
+	QPointer<internal::FieldAutocompleteInner> _inner;
 
-	ChatData *_chat;
-	UserData *_user;
-	ChannelData *_channel;
+	ChatData *_chat = nullptr;
+	UserData *_user = nullptr;
+	ChannelData *_channel = nullptr;
 	EmojiPtr _emoji;
 	enum class Type {
 		Mentions,
@@ -124,21 +127,17 @@ private:
 	bool _addInlineBots;
 
 	int32 _width, _height;
-	bool _hiding;
+	bool _hiding = false;
 
-	anim::fvalue a_opacity;
-	Animation _a_appearance;
+	Animation _a_opacity;
 
-	QTimer _hideTimer;
-
-	BoxShadow _shadow;
 	friend class internal::FieldAutocompleteInner;
 
 };
 
 namespace internal {
 
-class FieldAutocompleteInner final : public TWidget {
+class FieldAutocompleteInner final : public TWidget, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -149,8 +148,6 @@ public:
 	bool chooseSelected(FieldAutocomplete::ChooseMethod method) const;
 
 	void setRecentInlineBotsInRows(int32 bots);
-
-	~FieldAutocompleteInner();
 
 signals:
 	void mentionChosen(UserData *user, FieldAutocomplete::ChooseMethod method) const;

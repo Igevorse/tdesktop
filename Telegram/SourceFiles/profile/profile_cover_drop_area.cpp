@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "profile/profile_cover_drop_area.h"
@@ -57,7 +57,9 @@ void CoverDropArea::paintEvent(QPaintEvent *e) {
 		_cache = QPixmap();
 		if (_hiding) {
 			hide();
-			_hideFinishCallback.call(this);
+			if (_hideFinishCallback) {
+				_hideFinishCallback(this);
+			}
 			return;
 		}
 	}
@@ -93,7 +95,7 @@ void CoverDropArea::setupAnimation() {
 		_cache = myGrab(this);
 	}
 	auto from = _hiding ? 1. : 0., to = _hiding ? 0. : 1.;
-	START_ANIMATION(_a_appearance, func(this, &CoverDropArea::refreshCallback), from, to, st::profileDropAreaDuration, anim::linear);
+	_a_appearance.start([this]() { update(); }, from, to, st::profileDropAreaDuration);
 }
 
 } // namespace Profile

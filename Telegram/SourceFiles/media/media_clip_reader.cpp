@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "media/media_clip_reader.h"
@@ -54,16 +54,16 @@ QPixmap _prepareFrame(const FrameRequest &request, const QImage &original, bool 
 			Painter p(&cache);
 			if (newcache) {
 				if (request.framew < request.outerw) {
-					p.fillRect(0, 0, (request.outerw - request.framew) / (2 * factor), cache.height() / factor, st::black);
-					p.fillRect((request.outerw - request.framew) / (2 * factor) + (request.framew / factor), 0, (cache.width() / factor) - ((request.outerw - request.framew) / (2 * factor) + (request.framew / factor)), cache.height() / factor, st::black);
+					p.fillRect(0, 0, (request.outerw - request.framew) / (2 * factor), cache.height() / factor, st::imageBg);
+					p.fillRect((request.outerw - request.framew) / (2 * factor) + (request.framew / factor), 0, (cache.width() / factor) - ((request.outerw - request.framew) / (2 * factor) + (request.framew / factor)), cache.height() / factor, st::imageBg);
 				}
 				if (request.frameh < request.outerh) {
-					p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), 0, qMin(cache.width(), request.framew) / factor, (request.outerh - request.frameh) / (2 * factor), st::black);
-					p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), (request.outerh - request.frameh) / (2 * factor) + (request.frameh / factor), qMin(cache.width(), request.framew) / factor, (cache.height() / factor) - ((request.outerh - request.frameh) / (2 * factor) + (request.frameh / factor)), st::black);
+					p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), 0, qMin(cache.width(), request.framew) / factor, (request.outerh - request.frameh) / (2 * factor), st::imageBg);
+					p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), (request.outerh - request.frameh) / (2 * factor) + (request.frameh / factor), qMin(cache.width(), request.framew) / factor, (cache.height() / factor) - ((request.outerh - request.frameh) / (2 * factor) + (request.frameh / factor)), st::imageBg);
 				}
 			}
 			if (hasAlpha) {
-				p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), qMax(0, (request.outerh - request.frameh) / (2 * factor)), qMin(cache.width(), request.framew) / factor, qMin(cache.height(), request.frameh) / factor, st::white);
+				p.fillRect(qMax(0, (request.outerw - request.framew) / (2 * factor)), qMax(0, (request.outerh - request.frameh) / (2 * factor)), qMin(cache.width(), request.framew) / factor, qMin(cache.height(), request.frameh) / factor, st::imageBgTransparent);
 			}
 			QPoint position((request.outerw - request.framew) / (2 * factor), (request.outerh - request.frameh) / (2 * factor));
 			if (badSize) {
@@ -76,7 +76,7 @@ QPixmap _prepareFrame(const FrameRequest &request, const QImage &original, bool 
 			}
 		}
 		if (request.radius != ImageRoundRadius::None) {
-			imageRound(cache, request.radius);
+			Images::prepareRound(cache, request.radius, request.corners);
 		}
 		return QPixmap::fromImage(cache, Qt::ColorOnly);
 	}
@@ -180,12 +180,12 @@ void Reader::moveToNextWrite() const {
 
 void Reader::callback(Reader *reader, int32 threadIndex, Notification notification) {
 	// check if reader is not deleted already
-	if (managers.size() > threadIndex && managers.at(threadIndex)->carries(reader)) {
-		reader->_callback.call(notification);
+	if (managers.size() > threadIndex && managers.at(threadIndex)->carries(reader) && reader->_callback) {
+		reader->_callback(notification);
 	}
 }
 
-void Reader::start(int32 framew, int32 frameh, int32 outerw, int32 outerh, ImageRoundRadius radius) {
+void Reader::start(int32 framew, int32 frameh, int32 outerw, int32 outerh, ImageRoundRadius radius, ImageRoundCorners corners) {
 	if (managers.size() <= _threadIndex) error();
 	if (_state == State::Error) return;
 
@@ -198,17 +198,19 @@ void Reader::start(int32 framew, int32 frameh, int32 outerw, int32 outerh, Image
 		request.outerw = outerw * factor;
 		request.outerh = outerh * factor;
 		request.radius = radius;
+		request.corners = corners;
 		_frames[0].request = _frames[1].request = _frames[2].request = request;
 		moveToNextShow();
 		managers.at(_threadIndex)->start(this);
 	}
 }
 
-QPixmap Reader::current(int32 framew, int32 frameh, int32 outerw, int32 outerh, uint64 ms) {
+QPixmap Reader::current(int32 framew, int32 frameh, int32 outerw, int32 outerh, ImageRoundRadius radius, ImageRoundCorners corners, TimeMs ms) {
 	auto frame = frameToShow();
 	t_assert(frame != nullptr);
 
-	if (ms) {
+	auto shouldBePaused = !ms;
+	if (!shouldBePaused) {
 		frame->displayed.storeRelease(1);
 		if (_autoPausedGif.loadAcquire()) {
 			_autoPausedGif.storeRelease(0);
@@ -218,11 +220,14 @@ QPixmap Reader::current(int32 framew, int32 frameh, int32 outerw, int32 outerh, 
 			}
 		}
 	} else {
-		frame->displayed.storeRelease(-1); // displayed, but should be paused
+		frame->displayed.storeRelease(-1);
 	}
 
-	int32 factor(cIntRetinaFactor());
-	if (frame->pix.width() == outerw * factor && frame->pix.height() == outerh * factor) {
+	auto factor = cIntRetinaFactor();
+	if (frame->pix.width() == outerw * factor
+		&& frame->pix.height() == outerh * factor
+		&& frame->request.radius == radius
+		&& frame->request.corners == corners) {
 		moveToNextShow();
 		return frame->pix;
 	}
@@ -237,7 +242,7 @@ QPixmap Reader::current(int32 framew, int32 frameh, int32 outerw, int32 outerh, 
 	frame->pix = QPixmap();
 	frame->pix = _prepareFrame(frame->request, frame->original, true, cacheForResize);
 
-	Frame *other = frameToWriteNext(true);
+	auto other = frameToWriteNext(true);
 	if (other) other->request = frame->request;
 
 	moveToNextShow();
@@ -253,7 +258,7 @@ QPixmap Reader::current(int32 framew, int32 frameh, int32 outerw, int32 outerh, 
 bool Reader::ready() const {
 	if (_width && _height) return true;
 
-	Frame *frame = frameToShow();
+	auto frame = frameToShow();
 	if (frame) {
 		_width = frame->original.width();
 		_height = frame->original.height();
@@ -266,14 +271,14 @@ bool Reader::hasAudio() const {
 	return ready() ? _hasAudio : false;
 }
 
-int64 Reader::getPositionMs() const {
+TimeMs Reader::getPositionMs() const {
 	if (auto frame = frameToShow()) {
 		return frame->positionMs;
 	}
 	return _seekPositionMs;
 }
 
-int64 Reader::getDurationMs() const {
+TimeMs Reader::getDurationMs() const {
 	return ready() ? _durationMs : 0;
 }
 
@@ -340,7 +345,7 @@ public:
 		_accessed = true;
 	}
 
-	ProcessResult start(uint64 ms) {
+	ProcessResult start(TimeMs ms) {
 		if (!_implementation && !init()) {
 			return error();
 		}
@@ -388,7 +393,7 @@ public:
 		return ProcessResult::Wait;
 	}
 
-	ProcessResult process(uint64 ms) { // -1 - do nothing, 0 - update, 1 - reinit
+	ProcessResult process(TimeMs ms) { // -1 - do nothing, 0 - update, 1 - reinit
 		if (_state == State::Error) {
 			return ProcessResult::Error;
 		} else if (_state == State::Finished) {
@@ -411,7 +416,7 @@ public:
 		return ProcessResult::Wait;
 	}
 
-	ProcessResult finishProcess(uint64 ms) {
+	ProcessResult finishProcess(TimeMs ms) {
 		auto frameMs = _seekPositionMs + ms - _animationStarted;
 		auto readResult = _implementation->readFramesTill(frameMs, ms);
 		if (readResult == internal::ReaderImplementation::ReadResult::EndOfFile) {
@@ -423,7 +428,7 @@ public:
 		}
 		_nextFramePositionMs = _implementation->frameRealTime();
 		_nextFrameWhen = _animationStarted + _implementation->framePresentationTime();
-		if (static_cast<int64>(_nextFrameWhen) > _seekPositionMs) {
+		if (_nextFrameWhen > _seekPositionMs) {
 			_nextFrameWhen -= _seekPositionMs;
 		} else {
 			_nextFrameWhen = 1;
@@ -472,21 +477,21 @@ public:
 		return _implementation->start(implementationMode(), _seekPositionMs);
 	}
 
-	void startedAt(uint64 ms) {
+	void startedAt(TimeMs ms) {
 		_animationStarted = _nextFrameWhen = ms;
 	}
 
-	void pauseVideo(uint64 ms) {
+	void pauseVideo(TimeMs ms) {
 		if (_videoPausedAtMs) return; // Paused already.
 
 		_videoPausedAtMs = ms;
 		_implementation->pauseAudio();
 	}
 
-	void resumeVideo(uint64 ms) {
+	void resumeVideo(TimeMs ms) {
 		if (!_videoPausedAtMs) return; // Not paused.
 
-		int64 delta = static_cast<int64>(ms) - static_cast<int64>(_videoPausedAtMs);
+		auto delta = ms - _videoPausedAtMs;
 		_animationStarted += delta;
 		_nextFrameWhen += delta;
 
@@ -522,7 +527,7 @@ private:
 	State _state = State::Reading;
 	Reader::Mode _mode;
 	uint64 _playId;
-	int64 _seekPositionMs = 0;
+	TimeMs _seekPositionMs = 0;
 
 	QByteArray _data;
 	std_::unique_ptr<FileLocation> _location;
@@ -536,10 +541,10 @@ private:
 		QPixmap pix;
 		QImage original, cache;
 		bool alpha = true;
-		uint64 when = 0;
+		TimeMs when = 0;
 
 		// Counted from the end, so that positionMs <= durationMs despite keep up delays.
-		int64 positionMs = 0;
+		TimeMs positionMs = 0;
 	};
 	Frame _frames[3];
 	int _frame = 0;
@@ -551,14 +556,14 @@ private:
 	int _height = 0;
 
 	bool _hasAudio = false;
-	int64 _durationMs = 0;
-	uint64 _animationStarted = 0;
-	uint64 _nextFrameWhen = 0;
-	int64 _nextFramePositionMs = 0;
+	TimeMs _durationMs = 0;
+	TimeMs _animationStarted = 0;
+	TimeMs _nextFrameWhen = 0;
+	TimeMs _nextFramePositionMs = 0;
 
 	bool _autoPausedGif = false;
 	bool _started = false;
-	uint64 _videoPausedAtMs = 0;
+	TimeMs _videoPausedAtMs = 0;
 
 	friend class Manager;
 
@@ -588,15 +593,12 @@ void Manager::start(Reader *reader) {
 }
 
 void Manager::update(Reader *reader) {
-	QReadLocker lock(&_readerPointersMutex);
-	auto i = _readerPointers.constFind(reader);
+	QMutexLocker lock(&_readerPointersMutex);
+	auto i = _readerPointers.find(reader);
 	if (i == _readerPointers.cend()) {
-		lock.unlock();
-
-		QWriteLocker lock(&_readerPointersMutex);
-		_readerPointers.insert(reader, MutableAtomicInt(1));
+		_readerPointers.insert(reader, QAtomicInt(1));
 	} else {
-		i->v.storeRelease(1);
+		i->storeRelease(1);
 	}
 	emit processDelayed();
 }
@@ -604,13 +606,13 @@ void Manager::update(Reader *reader) {
 void Manager::stop(Reader *reader) {
 	if (!carries(reader)) return;
 
-	QWriteLocker lock(&_readerPointersMutex);
+	QMutexLocker lock(&_readerPointersMutex);
 	_readerPointers.remove(reader);
 	emit processDelayed();
 }
 
 bool Manager::carries(Reader *reader) const {
-	QReadLocker lock(&_readerPointersMutex);
+	QMutexLocker lock(&_readerPointersMutex);
 	return _readerPointers.contains(reader);
 }
 
@@ -628,20 +630,14 @@ Manager::ReaderPointers::const_iterator Manager::constUnsafeFindReaderPointer(Re
 	return (it == _readerPointers.cend() || it.key()->_private == reader) ? it : _readerPointers.cend();
 }
 
-bool Manager::handleProcessResult(ReaderPrivate *reader, ProcessResult result, uint64 ms) {
-	QReadLocker lock(&_readerPointersMutex);
-	auto it = constUnsafeFindReaderPointer(reader);
+bool Manager::handleProcessResult(ReaderPrivate *reader, ProcessResult result, TimeMs ms) {
+	QMutexLocker lock(&_readerPointersMutex);
+	auto it = unsafeFindReaderPointer(reader);
 	if (result == ProcessResult::Error) {
 		if (it != _readerPointers.cend()) {
-			lock.unlock();
-			QWriteLocker lock(&_readerPointersMutex);
-
-			auto i = unsafeFindReaderPointer(reader);
-			if (i != _readerPointers.cend()) {
-				i.key()->error();
-				emit callback(i.key(), i.key()->threadIndex(), NotificationReinit);
-				_readerPointers.erase(i);
-			}
+			it.key()->error();
+			emit callback(it.key(), it.key()->threadIndex(), NotificationReinit);
+			_readerPointers.erase(it);
 		}
 		return false;
 	} else if (result == ProcessResult::Finished) {
@@ -663,8 +659,8 @@ bool Manager::handleProcessResult(ReaderPrivate *reader, ProcessResult result, u
 	// See if we need to pause GIF because it is not displayed right now.
 	if (!reader->_autoPausedGif && reader->_mode == Reader::Mode::Gif && result == ProcessResult::Repaint) {
 		int32 ishowing, iprevious;
-		Reader::Frame *showing = it.key()->frameToShow(&ishowing), *previous = it.key()->frameToWriteNext(false, &iprevious);
-		t_assert(previous != 0 && showing != 0 && ishowing >= 0 && iprevious >= 0);
+		auto showing = it.key()->frameToShow(&ishowing), previous = it.key()->frameToWriteNext(false, &iprevious);
+		t_assert(previous != nullptr && showing != nullptr && ishowing >= 0 && iprevious >= 0);
 		if (reader->_frames[ishowing].when > 0 && showing->displayed.loadAcquire() <= 0) { // current frame was not shown
 			if (reader->_frames[ishowing].when + WaitBeforeGifPause < ms || (reader->_frames[iprevious].when && previous->displayed.loadAcquire() <= 0)) {
 				reader->_autoPausedGif = true;
@@ -675,7 +671,7 @@ bool Manager::handleProcessResult(ReaderPrivate *reader, ProcessResult result, u
 	}
 	if (result == ProcessResult::Started || result == ProcessResult::CopyFrame) {
 		t_assert(reader->_frame >= 0);
-		Reader::Frame *frame = it.key()->_frames + reader->_frame;
+		auto frame = it.key()->_frames + reader->_frame;
 		frame->clear();
 		frame->pix = reader->frame()->pix;
 		frame->original = reader->frame()->original;
@@ -696,7 +692,7 @@ bool Manager::handleProcessResult(ReaderPrivate *reader, ProcessResult result, u
 	return true;
 }
 
-Manager::ResultHandleState Manager::handleResult(ReaderPrivate *reader, ProcessResult result, uint64 ms) {
+Manager::ResultHandleState Manager::handleResult(ReaderPrivate *reader, ProcessResult result, TimeMs ms) {
 	if (!handleProcessResult(reader, result, ms)) {
 		_loadLevel.fetchAndAddRelaxed(-1 * (reader->_width > 0 ? reader->_width * reader->_height : AverageGifSize));
 		delete reader;
@@ -710,8 +706,8 @@ Manager::ResultHandleState Manager::handleResult(ReaderPrivate *reader, ProcessR
 
 	if (result == ProcessResult::Repaint) {
 		{
-			QReadLocker lock(&_readerPointersMutex);
-			ReaderPointers::const_iterator it = constUnsafeFindReaderPointer(reader);
+			QMutexLocker lock(&_readerPointersMutex);
+			auto it = constUnsafeFindReaderPointer(reader);
 			if (it != _readerPointers.cend()) {
 				int32 index = 0;
 				Reader *r = it.key();
@@ -740,11 +736,11 @@ void Manager::process() {
 	_processingInThread = thread();
 
 	bool checkAllReaders = false;
-	uint64 ms = getms(), minms = ms + 86400 * 1000ULL;
+	auto ms = getms(), minms = ms + 86400 * 1000LL;
 	{
-		QReadLocker lock(&_readerPointersMutex);
+		QMutexLocker lock(&_readerPointersMutex);
 		for (auto it = _readerPointers.begin(), e = _readerPointers.end(); it != e; ++it) {
-			if (it->v.loadAcquire() && it.key()->_private != nullptr) {
+			if (it->loadAcquire() && it.key()->_private != nullptr) {
 				auto i = _readers.find(it.key()->_private);
 				if (i == _readers.cend()) {
 					_readers.insert(it.key()->_private, 0);
@@ -759,9 +755,9 @@ void Manager::process() {
 						i.key()->resumeVideo(ms);
 					}
 				}
-				Reader::Frame *frame = it.key()->frameToWrite();
+				auto frame = it.key()->frameToWrite();
 				if (frame) it.key()->_private->_request = frame->request;
-				it->v.storeRelease(0);
+				it->storeRelease(0);
 			}
 		}
 		checkAllReaders = (_readers.size() > _readerPointers.size());
@@ -787,8 +783,8 @@ void Manager::process() {
 				i.value() = (ms + 86400 * 1000ULL);
 			}
 		} else if (checkAllReaders) {
-			QReadLocker lock(&_readerPointersMutex);
-			ReaderPointers::const_iterator it = constUnsafeFindReaderPointer(reader);
+			QMutexLocker lock(&_readerPointersMutex);
+			auto it = constUnsafeFindReaderPointer(reader);
 			if (it == _readerPointers.cend()) {
 				_loadLevel.fetchAndAddRelaxed(-1 * (reader->_width > 0 ? reader->_width * reader->_height : AverageGifSize));
 				delete reader;
@@ -820,8 +816,8 @@ void Manager::finish() {
 
 void Manager::clear() {
 	{
-		QWriteLocker lock(&_readerPointersMutex);
-		for (ReaderPointers::iterator it = _readerPointers.begin(), e = _readerPointers.end(); it != e; ++it) {
+		QMutexLocker lock(&_readerPointersMutex);
+		for (auto it = _readerPointers.begin(), e = _readerPointers.end(); it != e; ++it) {
 			it.key()->_private = nullptr;
 		}
 		_readerPointers.clear();

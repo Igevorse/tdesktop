@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "genlang.h"
 
@@ -27,14 +27,7 @@ Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin)
 #endif
 
 #ifdef Q_OS_MAC
-Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)
-Q_IMPORT_PLUGIN(QDDSPlugin)
-Q_IMPORT_PLUGIN(QICNSPlugin)
-Q_IMPORT_PLUGIN(QICOPlugin)
-Q_IMPORT_PLUGIN(QTgaPlugin)
-Q_IMPORT_PLUGIN(QTiffPlugin)
-Q_IMPORT_PLUGIN(QWbmpPlugin)
-Q_IMPORT_PLUGIN(QWebpPlugin)
+//Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin)
 #endif
 
 typedef unsigned int uint32;
@@ -410,7 +403,7 @@ In addition, as a special exception, the copyright holders give permission\n\
 to link the code of portions of this program with the OpenSSL library.\n\
 \n\
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE\n\
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org\n\
 */\n";
 			th << "#pragma once\n\n";
 
@@ -494,7 +487,7 @@ In addition, as a special exception, the copyright holders give permission\n\
 to link the code of portions of this program with the OpenSSL library.\n\
 \n\
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE\n\
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org\n\
 */\n";
 			tcpp << "#include \"stdafx.h\"\n#include \"lang.h\"\n\n";
 			tcpp << "namespace {\n";
@@ -549,7 +542,7 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
 			tcpp << "\t\tfor (const char *v = key.constData() + from, *e = v + len; v != e; ++v, ++value) {\n";
 			tcpp << "\t\t\tif (*v != *value) return false;\n";
 			tcpp << "\t\t}\n";
-			tcpp << "\t\treturn true; \n";
+			tcpp << "\t\treturn true;\n";
 			tcpp << "\t}\n";
 
 			tcpp << "}\n\n";
@@ -777,7 +770,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
 			cpp.close();
 		}
 		if (write_cpp) {
-			cout << "lang.cpp updated, writing " << keysOrder.size() << " rows.\n";
 			if (!cpp.open(QIODevice::WriteOnly)) throw Exception("Could not open lang.cpp for writing!");
 			if (cpp.write(cppText) != cppText.size()) throw Exception("Could not open lang.cpp for writing!");
 		}
@@ -791,7 +783,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org\n\
 			h.close();
 		}
 		if (write_h) {
-			cout << "lang.h updated, writing " << keysOrder.size() << " rows.\n";
 			if (!h.open(QIODevice::WriteOnly)) throw Exception("Could not open lang.h for writing!");
 			if (h.write(hText) != hText.size()) throw Exception("Could not open lang.h for writing!");
 		}

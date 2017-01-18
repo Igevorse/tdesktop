@@ -16,111 +16,58 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-#include "title.h"
 #include "pspecific.h"
-#include "ui/boxshadow.h"
 #include "platform/platform_main_window.h"
+#include "core/single_timer.h"
 
 class MediaView;
-class TitleWidget;
 class PasscodeWidget;
-class IntroWidget;
 class MainWidget;
-class SettingsWidget;
-class BackgroundWidget;
-class LayeredWidget;
-namespace Local {
-	class ClearManager;
-}
+class LayerStackWidget;
+class BoxContent;
 
-class ConnectingWidget : public QWidget {
+namespace Intro {
+class Widget;
+} // namespace Intro
+
+namespace Local {
+class ClearManager;
+} // namespace Local
+
+namespace Window {
+namespace Theme {
+struct BackgroundUpdate;
+class WarningWidget;
+} // namespace Theme
+} // namespace Window
+
+namespace Ui {
+class LinkButton;
+} // namespace Ui
+
+class ConnectingWidget : public TWidget {
 	Q_OBJECT
 
 public:
-
 	ConnectingWidget(QWidget *parent, const QString &text, const QString &reconnect);
 	void set(const QString &text, const QString &reconnect);
-	void paintEvent(QPaintEvent *e);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
 
 public slots:
-
 	void onReconnect();
 
 private:
-
-	BoxShadow _shadow;
 	QString _text;
-	int32 _textWidth;
-	LinkButton _reconnect;
+	int _textWidth = 0;
+	object_ptr<Ui::LinkButton> _reconnect;
 
 };
-
-class NotifyWindow : public TWidget {
-	Q_OBJECT
-
-public:
-
-	NotifyWindow(HistoryItem *item, int32 x, int32 y, int32 fwdCount);
-
-	void enterEvent(QEvent *e);
-	void leaveEvent(QEvent *e);
-	void mousePressEvent(QMouseEvent *e);
-	void paintEvent(QPaintEvent *e);
-
-	void step_appearance(float64 ms, bool timer);
-	void animHide(float64 duration, anim::transition func);
-	void startHiding();
-	void stopHiding();
-	void moveTo(int32 x, int32 y, int32 index = -1);
-
-	void updateNotifyDisplay();
-	void updatePeerPhoto();
-
-	void itemRemoved(HistoryItem *del);
-
-	int32 index() const {
-		return history ? _index : -1;
-	}
-
-	void unlinkHistory(History *hist = 0);
-
-	~NotifyWindow();
-
-public slots:
-
-	void hideByTimer();
-	void checkLastInput();
-
-	void unlinkHistoryAndNotify();
-
-private:
-
-#if defined Q_OS_WIN && !defined Q_OS_WINRT
-	DWORD started;
-#endif // Q_OS_WIN && !Q_OS_WINRT
-	History *history;
-	HistoryItem *item;
-	int32 fwdCount;
-	IconedButton close;
-	QPixmap pm;
-	float64 alphaDuration, posDuration;
-	QTimer hideTimer, inputTimer;
-	bool hiding;
-	int32 _index;
-	anim::fvalue a_opacity;
-	anim::transition a_func;
-	anim::ivalue a_y;
-	Animation _a_appearance;
-
-	ImagePtr peerPhoto;
-
-};
-
-typedef QList<NotifyWindow*> NotifyWindows;
 
 class MediaPreviewWidget;
 
@@ -131,69 +78,36 @@ public:
 	MainWindow();
 	~MainWindow();
 
-	void init();
 	void firstShow();
-
-	QWidget *filedialogParent();
-
-	bool eventFilter(QObject *obj, QEvent *evt);
 
 	void inactivePress(bool inactive);
 	bool inactivePress() const;
 
-	void wStartDrag(QMouseEvent *e);
-	void mouseMoveEvent(QMouseEvent *e);
-	void mouseReleaseEvent(QMouseEvent *e);
-	void closeEvent(QCloseEvent *e);
-
-	void paintEvent(QPaintEvent *e);
-
-	void resizeEvent(QResizeEvent *e);
-	void updateAdaptiveLayout();
-	bool needBackButton();
-
-	void setupPasscode(bool anim);
+	void setupPasscode();
 	void clearPasscode();
 	void checkAutoLockIn(int msec);
-	void setupIntro(bool anim);
-	void setupMain(bool anim, const MTPUser *user = 0);
-	void serviceNotification(const QString &msg, const MTPMessageMedia &media = MTP_messageMediaEmpty(), bool force = false);
+	void setupIntro();
+	void setupMain(const MTPUser *user = 0);
+	void serviceNotification(const TextWithEntities &message, const MTPMessageMedia &media = MTP_messageMediaEmpty(), int32 date = 0, bool force = false);
+	void serviceNotificationLocal(QString text);
 	void sendServiceHistoryRequest();
 	void showDelayedServiceMsgs();
 
 	void mtpStateChanged(int32 dc, int32 state);
 
-	TitleWidget *getTitle();
-
-	HitTestType hitTest(const QPoint &p) const;
-	QRect iconRect() const;
-
-	QRect clientRect() const;
-	QRect photoRect() const;
-
-	IntroWidget *introWidget();
 	MainWidget *mainWidget();
-	SettingsWidget *settingsWidget();
 	PasscodeWidget *passcodeWidget();
 
-	void showConnecting(const QString &text, const QString &reconnect = QString());
-	void hideConnecting();
-	bool connectingVisible() const;
-
-	void showPhoto(const PhotoOpenClickHandler *lnk, HistoryItem *item = 0);
-	void showPhoto(PhotoData *photo, HistoryItem *item);
-	void showPhoto(PhotoData *photo, PeerData *item);
-	void showDocument(DocumentData *doc, HistoryItem *item);
-
-	bool doWeReadServerHistory() const;
+	bool doWeReadServerHistory();
 
 	void activate();
 
-	void noIntro(IntroWidget *was);
-	void noSettings(SettingsWidget *was);
+	void noIntro(Intro::Widget *was);
 	void noMain(MainWidget *was);
-	void noBox(BackgroundWidget *was);
-	void layerFinishedHide(BackgroundWidget *was);
+	void noLayerStack(LayerStackWidget *was);
+	void layerFinishedHide(LayerStackWidget *was);
+
+	void checkHistoryActivation();
 
 	void fixOrder();
 
@@ -206,31 +120,19 @@ public:
 	TempDirState localStorageState();
 	void tempDirDelete(int task);
 
-    void notifySettingGot();
+	void notifySettingGot();
 	void notifySchedule(History *history, HistoryItem *item);
 	void notifyClear(History *history = 0);
 	void notifyClearFast();
-	void notifyShowNext(NotifyWindow *remove = 0);
-	void notifyItemRemoved(HistoryItem *item);
-	void notifyStopHiding();
-	void notifyStartHiding();
 	void notifyUpdateAll();
-	void notifyActivateAll();
 
-    QImage iconLarge() const;
+	QImage iconLarge() const;
 
 	void sendPaths();
 
-	void mediaOverviewUpdated(PeerData *peer, MediaOverviewType type);
-	void documentUpdated(DocumentData *doc);
-	void changingMsgId(HistoryItem *row, MsgId newId);
+	void changingMsgId(HistoryItem *row, MsgId newId) override;
 
-	bool isActive(bool cached = true) const;
-	void hideMediaview();
-
-	void updateUnreadCounter();
-
-	QImage iconWithCounter(int size, int count, style::color bg, bool smallIcon);
+	QImage iconWithCounter(int size, int count, style::color bg, style::color fg, bool smallIcon) override;
 
 	bool contentOverlapped(const QRect &globalRect);
 	bool contentOverlapped(QWidget *w, QPaintEvent *e) {
@@ -240,30 +142,36 @@ public:
 		return contentOverlapped(QRect(w->mapToGlobal(r.boundingRect().topLeft()), r.boundingRect().size()));
 	}
 
-	void ui_showLayer(LayeredWidget *box, ShowLayerOptions options);
+	void showMainMenu();
+	void updateTrayMenu(bool force = false) override;
+
+	void ui_showBox(object_ptr<BoxContent> box, ShowLayerOptions options);
+	void ui_hideSettingsAndLayer(ShowLayerOptions options);
 	bool ui_isLayerShown();
-	bool ui_isMediaViewShown();
 	void ui_showMediaPreview(DocumentData *document);
 	void ui_showMediaPreview(PhotoData *photo);
 	void ui_hideMediaPreview();
-	PeerData *ui_getPeerForMouseAction();
+	PeerData *ui_getPeerForMouseAction() override;
+
+protected:
+	bool eventFilter(QObject *o, QEvent *e) override;
+	void closeEvent(QCloseEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
+
+	void initHook() override;
+	void updateIsActiveHook() override;
+	void clearWidgetsHook() override;
 
 public slots:
-	void updateIsActive(int timeout = 0);
-
-	void checkHistoryActivation();
-
 	void checkAutoLock();
 
 	void showSettings();
-	void hideSettings(bool fast = false);
 	void layerHidden();
 	void setInnerFocus();
-	void updateTitleStatus();
+	void updateConnectingStatus();
 
 	void quitFromTray();
 	void showFromTray(QSystemTrayIcon::ActivationReason reason = QSystemTrayIcon::Unknown);
-	bool minimizeToTray();
 	void toggleTray(QSystemTrayIcon::ActivationReason reason = QSystemTrayIcon::Unknown);
 	void toggleDisplayNotifyFromTray();
 
@@ -272,94 +180,87 @@ public slots:
 	void onClearFinished(int task, void *manager);
 	void onClearFailed(int task, void *manager);
 
-	void notifyFire();
-	void updateTrayMenu(bool force = false);
+	void notifyShowNext();
 
 	void onShowAddContact();
 	void onShowNewGroup();
 	void onShowNewChannel();
 	void onLogout();
-	void onLogoutSure();
-	void updateGlobalMenu(); // for OS X top menu
-
-	void onReActivate();
-
-	void notifyUpdateAllPhotos();
 
 	void app_activateClickHandler(ClickHandlerPtr handler, Qt::MouseButton button);
 
 signals:
-	void resized(const QSize &size);
 	void tempDirCleared(int task);
 	void tempDirClearFailed(int task);
-	void newAuthorization();
-
-	void imageLoaded();
+	void checkNewAuthorization();
 
 private slots:
 	void onStateChanged(Qt::WindowState state);
 
+	void onWindowActiveChanged();
+
 private:
+	void showConnecting(const QString &text, const QString &reconnect = QString());
+	void hideConnecting();
+
+	void themeUpdated(const Window::Theme::BackgroundUpdate &data);
+
+	void updateControlsGeometry();
 
 	QPixmap grabInner();
 
-	void placeSmallCounter(QImage &img, int size, int count, style::color bg, const QPoint &shift, style::color color);
+	void placeSmallCounter(QImage &img, int size, int count, style::color bg, const QPoint &shift, style::color color) override;
 	QImage icon16, icon32, icon64, iconbig16, iconbig32, iconbig64;
 
-	QWidget *centralwidget;
-
-	typedef QPair<QString, MTPMessageMedia> DelayedServiceMsg;
-	QVector<DelayedServiceMsg> _delayedServiceMsgs;
+	struct DelayedServiceMsg {
+		DelayedServiceMsg(const TextWithEntities &message, const MTPMessageMedia &media, int32 date) : message(message), media(media), date(date) {
+		}
+		TextWithEntities message;
+		MTPMessageMedia media;
+		int32 date;
+	};
+	QList<DelayedServiceMsg> _delayedServiceMsgs;
 	mtpRequestId _serviceHistoryRequest = 0;
 
-	TitleWidget *title = nullptr;
-	PasscodeWidget *_passcode = nullptr;
-	IntroWidget *intro = nullptr;
-	MainWidget *main = nullptr;
-	SettingsWidget *settings = nullptr;
-	BackgroundWidget *layerBg = nullptr;
-	std_::unique_ptr<MediaPreviewWidget> _mediaPreview;
+	object_ptr<PasscodeWidget> _passcode = { nullptr };
+	object_ptr<Intro::Widget> _intro = { nullptr };
+	object_ptr<MainWidget> _main = { nullptr };
+	object_ptr<LayerStackWidget> _layerBg = { nullptr };
+	object_ptr<MediaPreviewWidget> _mediaPreview = { nullptr };
 
-	QTimer _isActiveTimer;
-	bool _isActive = false;
-
-	ConnectingWidget *_connecting = nullptr;
+	object_ptr<ConnectingWidget> _connecting = { nullptr };
+	object_ptr<Window::Theme::WarningWidget> _testingThemeWarning = { nullptr };
 
 	Local::ClearManager *_clearManager = nullptr;
-
-	void clearWidgets();
-
-	bool dragging = false;
-	QPoint dragStart;
 
 	bool _inactivePress = false;
 	QTimer _inactiveTimer;
 
 	SingleTimer _autoLockTimer;
-	uint64 _shouldLockAt = 0;
+	TimeMs _shouldLockAt = 0;
 
-	typedef QMap<MsgId, uint64> NotifyWhenMap;
-	typedef QMap<History*, NotifyWhenMap> NotifyWhenMaps;
-	NotifyWhenMaps notifyWhenMaps;
+	using NotifyWhenMap = QMap<MsgId, TimeMs>;
+	using NotifyWhenMaps = QMap<History*, NotifyWhenMap>;
+	NotifyWhenMaps _notifyWhenMaps;
 	struct NotifyWaiter {
-		NotifyWaiter(MsgId msg, uint64 when, PeerData *notifyByFrom) : msg(msg), when(when), notifyByFrom(notifyByFrom) {
+		NotifyWaiter(MsgId msg, TimeMs when, PeerData *notifyByFrom)
+		: msg(msg)
+		, when(when)
+		, notifyByFrom(notifyByFrom) {
 		}
 		MsgId msg;
-		uint64 when;
+		TimeMs when;
 		PeerData *notifyByFrom;
 	};
-	typedef QMap<History*, NotifyWaiter> NotifyWaiters;
-	NotifyWaiters notifyWaiters;
-	NotifyWaiters notifySettingWaiters;
-	SingleTimer notifyWaitTimer;
+	using NotifyWaiters = QMap<History*, NotifyWaiter>;
+	NotifyWaiters _notifyWaiters;
+	NotifyWaiters _notifySettingWaiters;
+	SingleTimer _notifyWaitTimer;
 
-	typedef QMap<uint64, PeerData*> NotifyWhenAlert;
-	typedef QMap<History*, NotifyWhenAlert> NotifyWhenAlerts;
-	NotifyWhenAlerts notifyWhenAlerts;
+	using NotifyWhenAlert = QMap<TimeMs, PeerData*>;
+	using NotifyWhenAlerts = QMap<History*, NotifyWhenAlert>;
+	NotifyWhenAlerts _notifyWhenAlerts;
 
-	NotifyWindows notifyWindows;
-
-	MediaView *_mediaView = nullptr;
 };
 
 class PreLaunchWindow : public TWidget {
@@ -460,7 +361,7 @@ public slots:
 	void onUpdateDownloading(qint64 ready, qint64 total);
 	void onUpdateReady();
 	void onUpdateFailed();
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
 protected:
 
@@ -523,7 +424,7 @@ private:
 
 	void setUpdatingState(UpdatingState state, bool force = false);
 	void setDownloadProgress(qint64 ready, qint64 total);
-#endif
+#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
 	QString getReportField(const QLatin1String &name, const QLatin1String &prefix);
 	void addReportFieldPart(const QLatin1String &name, const QLatin1String &prefix, QHttpMultiPart *multipart);

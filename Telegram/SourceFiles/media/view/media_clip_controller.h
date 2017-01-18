@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -43,7 +43,7 @@ public:
 	void showAnimated();
 	void hideAnimated();
 
-	void updatePlayback(const AudioPlaybackState &playbackState, bool reset);
+	void updatePlayback(const AudioPlaybackState &playbackState);
 	void setInFullScreen(bool inFullScreen);
 
 	void grabStart() override;
@@ -54,15 +54,11 @@ public:
 signals:
 	void playPressed();
 	void pausePressed();
-	void seekProgress(int64 positionMs);
-	void seekFinished(int64 positionMs);
+	void seekProgress(TimeMs positionMs);
+	void seekFinished(TimeMs positionMs);
 	void volumeChanged(float64 volume);
 	void toFullScreenPressed();
 	void fromFullScreenPressed();
-
-private slots:
-	void onSeekProgress(float64 progress);
-	void onSeekFinished(float64 progress);
 
 protected:
 	void resizeEvent(QResizeEvent *e) override;
@@ -70,6 +66,9 @@ protected:
 	void mousePressEvent(QMouseEvent *e) override;
 
 private:
+	void handleSeekProgress(float64 progress);
+	void handleSeekFinished(float64 progress);
+
 	template <typename Callback>
 	void startFading(Callback start);
 	void fadeFinished();
@@ -81,15 +80,15 @@ private:
 
 	bool _showPause = false;
 	QString _timeAlready, _timeLeft;
-	int64 _seekPositionMs = -1;
-	int64 _lastDurationMs = 0;
+	TimeMs _seekPositionMs = -1;
+	TimeMs _lastDurationMs = 0;
 
-	ChildWidget<Ui::IconButton> _playPauseResume;
-	ChildWidget<Playback> _playback;
-	ChildWidget<VolumeController> _volumeController;
-	ChildWidget<Ui::IconButton> _fullScreenToggle;
-	ChildWidget<Ui::LabelSimple> _playedAlready;
-	ChildWidget<Ui::LabelSimple> _toPlayLeft;
+	object_ptr<Ui::IconButton> _playPauseResume;
+	std_::unique_ptr<Playback> _playback;
+	object_ptr<VolumeController> _volumeController;
+	object_ptr<Ui::IconButton> _fullScreenToggle;
+	object_ptr<Ui::LabelSimple> _playedAlready;
+	object_ptr<Ui::LabelSimple> _toPlayLeft;
 
 	std_::unique_ptr<Ui::FadeAnimation> _fadeAnimation;
 

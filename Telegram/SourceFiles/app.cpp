@@ -16,20 +16,25 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "app.h"
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
+#ifdef OS_MAC_OLD
 #include <libexif/exif-data.h>
-#endif
+#endif // OS_MAC_OLD
 
 #include "styles/style_overview.h"
 #include "styles/style_mediaview.h"
+#include "styles/style_stickers.h"
+#include "styles/style_history.h"
+#include "styles/style_boxes.h"
 #include "lang.h"
 #include "data/data_abstract_structure.h"
 #include "history/history_service_layout.h"
+#include "history/history_location_manager.h"
+#include "history/history_media_types.h"
 #include "media/media_audio.h"
 #include "inline_bots/inline_bot_layout_item.h"
 #include "application.h"
@@ -39,51 +44,58 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "apiwrap.h"
 #include "numbers.h"
 #include "observer_peer.h"
+#include "window/window_theme.h"
+#include "window/notifications_manager.h"
+#include "platform/platform_notifications_manager.h"
 
 namespace {
 	App::LaunchState _launchState = App::Launched;
 
-	UserData *self = 0;
+	UserData *self = nullptr;
 
-	typedef QHash<PeerId, PeerData*> PeersData;
+	using PeersData = QHash<PeerId, PeerData*>;
 	PeersData peersData;
 
-	typedef QMap<PeerData*, bool> MutedPeers;
+	using MutedPeers = QMap<PeerData*, bool>;
 	MutedPeers mutedPeers;
 
-	typedef QMap<PeerData*, bool> UpdatedPeers;
+	using UpdatedPeers = QMap<PeerData*, bool>;
 	UpdatedPeers updatedPeers;
 
 	PhotosData photosData;
 	DocumentsData documentsData;
 
-	typedef QHash<LocationCoords, LocationData*> LocationsData;
+	using LocationsData = QHash<LocationCoords, LocationData*>;
 	LocationsData locationsData;
 
-	typedef QHash<WebPageId, WebPageData*> WebPagesData;
+	using WebPagesData = QHash<WebPageId, WebPageData*>;
 	WebPagesData webPagesData;
+
+	using GamesData = QHash<GameId, GameData*>;
+	GamesData gamesData;
 
 	PhotoItems photoItems;
 	DocumentItems documentItems;
 	WebPageItems webPageItems;
+	GameItems gameItems;
 	SharedContactItems sharedContactItems;
 	GifItems gifItems;
 
-	typedef OrderedSet<HistoryItem*> DependentItemsSet;
-	typedef QMap<HistoryItem*, DependentItemsSet> DependentItems;
+	using DependentItemsSet = OrderedSet<HistoryItem*>;
+	using DependentItems = QMap<HistoryItem*, DependentItemsSet>;
 	DependentItems dependentItems;
 
 	Histories histories;
 
-	typedef QHash<MsgId, HistoryItem*> MsgsData;
+	using MsgsData = QHash<MsgId, HistoryItem*>;
 	MsgsData msgsData;
-	typedef QMap<ChannelId, MsgsData> ChannelMsgsData;
+	using ChannelMsgsData = QMap<ChannelId, MsgsData>;
 	ChannelMsgsData channelMsgsData;
 
-	typedef QMap<uint64, FullMsgId> RandomData;
+	using RandomData = QMap<uint64, FullMsgId>;
 	RandomData randomData;
 
-	typedef QMap<uint64, QPair<PeerId, QString> > SentData;
+	using SentData = QMap<uint64, QPair<PeerId, QString>>;
 	SentData sentData;
 
 	HistoryItem *hoveredItem = nullptr,
@@ -93,7 +105,7 @@ namespace {
 		*contextItem = nullptr,
 		*mousedItem = nullptr;
 
-	QPixmap *emoji = 0, *emojiLarge = 0;
+	QPixmap *emoji = nullptr, *emojiLarge = nullptr;
 	style::font monofont;
 
 	struct CornersPixmaps {
@@ -103,28 +115,20 @@ namespace {
 		QPixmap *p[4];
 	};
 	CornersPixmaps corners[RoundCornersCount];
-	typedef QMap<uint32, CornersPixmaps> CornersMap;
+	using CornersMap = QMap<uint32, CornersPixmaps>;
 	CornersMap cornersMap;
-	QImage *cornersMaskLarge[4] = { 0 }, *cornersMaskSmall[4] = { 0 };
+	QImage *cornersMaskLarge[4] = { nullptr }, *cornersMaskSmall[4] = { nullptr };
 
-	typedef QMap<uint64, QPixmap> EmojiMap;
+	using EmojiMap = QMap<uint64, QPixmap>;
 	EmojiMap mainEmojiMap;
 	QMap<int32, EmojiMap> otherEmojiMap;
 
 	int32 serviceImageCacheSize = 0;
 
-	typedef QLinkedList<PhotoData*> LastPhotosList;
+	using LastPhotosList = QLinkedList<PhotoData*>;
 	LastPhotosList lastPhotos;
-	typedef QHash<PhotoData*, LastPhotosList::iterator> LastPhotosMap;
+	using LastPhotosMap = QHash<PhotoData*, LastPhotosList::iterator>;
 	LastPhotosMap lastPhotosMap;
-
-	style::color _msgServiceBg;
-	style::color _msgServiceSelectBg;
-	style::color _historyScrollBarColor;
-	style::color _historyScrollBgColor;
-	style::color _historyScrollBarOverColor;
-	style::color _historyScrollBgOverColor;
-	style::color _introPointHoverColor;
 }
 
 namespace App {
@@ -170,13 +174,6 @@ namespace App {
 		return nullptr;
 	}
 
-	SettingsWidget *settings() {
-		if (auto w = wnd()) {
-			return w->settingsWidget();
-		}
-		return nullptr;
-	}
-
 	bool passcoded() {
 		if (auto w = wnd()) {
 			return w->passcodeWidget();
@@ -194,8 +191,9 @@ namespace App {
 
 namespace {
 	bool loggedOut() {
-		if (cHasPasscode()) {
-			cSetHasPasscode(false);
+		if (Global::LocalPasscode()) {
+			Global::SetLocalPasscode(false);
+			Global::RefLocalPasscodeChanged().notify();
 		}
 		if (audioPlayer()) {
 			audioPlayer()->stopAndClear();
@@ -203,10 +201,11 @@ namespace {
 		if (auto w = wnd()) {
 			w->tempDirDelete(Local::ClearManagerAll);
 			w->notifyClearFast();
-			w->setupIntro(true);
+			w->setupIntro();
 		}
-		MTP::authed(0);
+		MTP::setAuthedId(0);
 		Local::reset();
+		Window::Theme::Background()->reset();
 
 		cSetOtherOnline(0);
 		histories().clear();
@@ -216,9 +215,7 @@ namespace {
 		if (App::uploader()) App::uploader()->clear();
 		clearStorageImages();
 		if (auto w = wnd()) {
-			w->getTitle()->updateBackButton();
-			w->updateTitleStatus();
-			w->getTitle()->resizeEvent(0);
+			w->updateConnectingStatus();
 		}
 		return true;
 	}
@@ -355,8 +352,13 @@ namespace {
 
 			// {fulltype} is in "{type}-{tag}-{tag}-{tag}" format
 			// if we find "all" tag we return the restriction string
-			QStringList typeTags = fullRestriction.mid(0, fullTypeEnd).split('-').mid(1);
-			if (typeTags.contains(qsl("all"))) {
+			auto typeTags = fullRestriction.mid(0, fullTypeEnd).split('-').mid(1);
+#ifndef OS_MAC_STORE
+			auto restrictionApplies = typeTags.contains(qsl("all"));
+#else // OS_MAC_STORE
+			auto restrictionApplies = typeTags.contains(qsl("all")) || typeTags.contains(qsl("ios"));
+#endif // OS_MAC_STORE
+			if (restrictionApplies) {
 				return fullRestriction.midRef(fullTypeEnd + 1).trimmed().toString();
 			}
 			return QString();
@@ -394,9 +396,9 @@ namespace {
 
 		switch (user.type()) {
 		case mtpc_userEmpty: {
-			auto &d(user.c_userEmpty());
+			auto &d = user.c_userEmpty();
 
-			PeerId peer(peerFromUser(d.vid.v));
+			auto peer = peerFromUser(d.vid.v);
 			data = App::user(peer);
 			auto canShareThisContact = data->canShareThisContactFast();
 			wasContact = data->isContact();
@@ -415,10 +417,10 @@ namespace {
 			if (wasContact != data->isContact()) update.flags |= UpdateFlag::UserIsContact;
 		} break;
 		case mtpc_user: {
-			auto &d(user.c_user());
+			auto &d = user.c_user();
 			minimal = d.is_min();
 
-			PeerId peer(peerFromUser(d.vid.v));
+			auto peer = peerFromUser(d.vid.v);
 			data = App::user(peer);
 			auto canShareThisContact = data->canShareThisContactFast();
 			wasContact = data->isContact();
@@ -508,7 +510,7 @@ namespace {
 				}
 				if (d.is_self() && ::self != data) {
 					::self = data;
-					if (App::wnd()) App::wnd()->updateGlobalMenu();
+					Global::RefSelfChanged().notify();
 				}
 			}
 
@@ -1089,15 +1091,16 @@ namespace {
 	}
 
 	bool checkEntitiesAndViewsUpdate(const MTPDmessage &m) {
-		PeerId peerId = peerFromMTP(m.vto_id);
+		auto peerId = peerFromMTP(m.vto_id);
 		if (m.has_from_id() && peerToUser(peerId) == MTP::authedId()) {
 			peerId = peerFromUser(m.vfrom_id);
 		}
-		if (HistoryItem *existing = App::histItemById(peerToChannel(peerId), m.vid.v)) {
+		if (auto existing = App::histItemById(peerToChannel(peerId), m.vid.v)) {
 			auto text = qs(m.vmessage);
 			auto entities = m.has_entities() ? entitiesFromMTP(m.ventities.c_vector().v) : EntitiesInText();
 			existing->setText({ text, entities });
 			existing->updateMedia(m.has_media() ? (&m.vmedia) : nullptr);
+			existing->updateReplyMarkup(m.has_reply_markup() ? (&m.vreply_markup) : nullptr);
 			existing->setViewsCount(m.has_views() ? m.vviews.v : -1);
 			existing->addToOverview(AddToOverviewNew);
 
@@ -1111,19 +1114,22 @@ namespace {
 		return false;
 	}
 
-	void updateEditedMessage(const MTPDmessage &m) {
-		PeerId peerId = peerFromMTP(m.vto_id);
+	template <typename TMTPDclass>
+	void updateEditedMessage(const TMTPDclass &m) {
+		auto peerId = peerFromMTP(m.vto_id);
 		if (m.has_from_id() && peerToUser(peerId) == MTP::authedId()) {
 			peerId = peerFromUser(m.vfrom_id);
 		}
-		if (HistoryItem *existing = App::histItemById(peerToChannel(peerId), m.vid.v)) {
+		if (auto existing = App::histItemById(peerToChannel(peerId), m.vid.v)) {
 			existing->applyEdition(m);
 		}
 	}
 
-	void updateEditedMessageToEmpty(PeerId peerId, MsgId msgId) {
-		if (auto existing = App::histItemById(peerToChannel(peerId), msgId)) {
-			existing->applyEditionToEmpty();
+	void updateEditedMessage(const MTPMessage &m) {
+		if (m.type() == mtpc_message) { // apply message edit
+			App::updateEditedMessage(m.c_message());
+		} else if (m.type() == mtpc_messageService) {
+			App::updateEditedMessage(m.c_messageService());
 		}
 	}
 
@@ -1188,22 +1194,20 @@ namespace {
 	ImagePtr image(const MTPPhotoSize &size) {
 		switch (size.type()) {
 		case mtpc_photoSize: {
-			const auto &d(size.c_photoSize());
+			auto &d = size.c_photoSize();
 			if (d.vlocation.type() == mtpc_fileLocation) {
-				const auto &l(d.vlocation.c_fileLocation());
+				auto &l = d.vlocation.c_fileLocation();
 				return ImagePtr(StorageImageLocation(d.vw.v, d.vh.v, l.vdc_id.v, l.vvolume_id.v, l.vlocal_id.v, l.vsecret.v), d.vsize.v);
 			}
 		} break;
 		case mtpc_photoCachedSize: {
-			const auto &d(size.c_photoCachedSize());
+			auto &d = size.c_photoCachedSize();
 			if (d.vlocation.type() == mtpc_fileLocation) {
-				const auto &l(d.vlocation.c_fileLocation());
-				const auto &s(d.vbytes.c_string().v);
-				QByteArray bytes(s.data(), s.size());
+				auto &l = d.vlocation.c_fileLocation();
+				auto bytes = qba(d.vbytes);
 				return ImagePtr(StorageImageLocation(d.vw.v, d.vh.v, l.vdc_id.v, l.vvolume_id.v, l.vlocal_id.v, l.vsecret.v), bytes);
 			} else if (d.vlocation.type() == mtpc_fileLocationUnavailable) {
-				const string &s(d.vbytes.c_string().v);
-				QByteArray bytes(s.data(), s.size());
+				auto bytes = qba(d.vbytes);
 				return ImagePtr(StorageImageLocation(d.vw.v, d.vh.v, 0, 0, 0, 0), bytes);
 			}
 		} break;
@@ -1243,7 +1247,7 @@ namespace {
 		if (auto history = App::historyLoaded(peer)) {
 			history->outboxRead(upTo);
 			if (history->lastMsg && history->lastMsg->out() && history->lastMsg->id <= upTo) {
-				if (App::main()) App::main()->dlgUpdated(history, history->lastMsg->id);
+				if (App::main()) App::main()->dlgUpdated(history->peer, history->lastMsg->id);
 			}
 			history->updateChatListEntry();
 
@@ -1421,12 +1425,12 @@ namespace {
 			char size = 0;
 			switch (i->type()) {
 			case mtpc_photoSize: {
-				const string &s(i->c_photoSize().vtype.c_string().v);
+				auto &s = i->c_photoSize().vtype.c_string().v;
 				if (s.size()) size = s[0];
 			} break;
 
 			case mtpc_photoCachedSize: {
-				const string &s(i->c_photoCachedSize().vtype.c_string().v);
+				auto &s = i->c_photoCachedSize().vtype.c_string().v;
 				if (s.size()) size = s[0];
 			} break;
 			}
@@ -1469,7 +1473,7 @@ namespace {
 	DocumentData *feedDocument(const MTPdocument &document, const QPixmap &thumb) {
 		switch (document.type()) {
 		case mtpc_document: {
-			const auto &d(document.c_document());
+			auto &d = document.c_document();
 			return App::documentSet(d.vid.v, 0, d.vaccess_hash.v, d.vversion.v, d.vdate.v, d.vattributes.c_vector().v, qs(d.vmime_type), ImagePtr(thumb, "JPG"), d.vdc_id.v, d.vsize.v, StorageImageLocation());
 		} break;
 		case mtpc_documentEmpty: return App::document(document.c_documentEmpty().vid.v);
@@ -1510,8 +1514,13 @@ namespace {
 			return page;
 		} break;
 		case mtpc_webPagePending: return App::feedWebPage(webpage.c_webPagePending());
+		case mtpc_webPageNotModified: LOG(("API Error: webPageNotModified is unexpected in feedWebPage().")); break;
 		}
-		return 0;
+		return nullptr;
+	}
+
+	GameData *feedGame(const MTPDgame &game, GameData *convert) {
+		return App::gameSet(game.vid.v, convert, game.vaccess_hash.v, qs(game.vshort_name), qs(game.vtitle), qs(game.vdescription), App::feedPhoto(game.vphoto), game.has_document() ? App::feedDocument(game.vdocument) : nullptr);
 	}
 
 	UserData *curUser() {
@@ -1751,8 +1760,8 @@ namespace {
 			auto &items = App::documentItems();
 			auto i = items.constFind(result);
 			if (i != items.cend()) {
-				for (auto j = i->cbegin(), e = i->cend(); j != e; ++j) {
-					j.key()->setPendingInitDimensions();
+				for_const (auto item, i.value()) {
+					item->setPendingInitDimensions();
 				}
 			}
 		}
@@ -1760,7 +1769,7 @@ namespace {
 	}
 
 	WebPageData *webPage(const WebPageId &webPage) {
-		WebPagesData::const_iterator i = webPagesData.constFind(webPage);
+		auto i = webPagesData.constFind(webPage);
 		if (i == webPagesData.cend()) {
 			i = webPagesData.insert(webPage, new WebPageData(webPage));
 		}
@@ -1770,7 +1779,7 @@ namespace {
 	WebPageData *webPageSet(const WebPageId &webPage, WebPageData *convert, const QString &type, const QString &url, const QString &displayUrl, const QString &siteName, const QString &title, const QString &description, PhotoData *photo, DocumentData *document, int32 duration, const QString &author, int32 pendingTill) {
 		if (convert) {
 			if (convert->id != webPage) {
-				WebPagesData::iterator i = webPagesData.find(convert->id);
+				auto i = webPagesData.find(convert->id);
 				if (i != webPagesData.cend() && i.value() == convert) {
 					webPagesData.erase(i);
 				}
@@ -1778,21 +1787,21 @@ namespace {
 			}
 			if ((convert->url.isEmpty() && !url.isEmpty()) || (convert->pendingTill && convert->pendingTill != pendingTill && pendingTill >= -1)) {
 				convert->type = toWebPageType(type);
-				convert->url = url;
-				convert->displayUrl = displayUrl;
-				convert->siteName = siteName;
-				convert->title = title;
-				convert->description = description;
+				convert->url = textClean(url);
+				convert->displayUrl = textClean(displayUrl);
+				convert->siteName = textClean(siteName);
+				convert->title = textOneLine(textClean(title));
+				convert->description = textClean(description);
 				convert->photo = photo;
 				convert->document = document;
 				convert->duration = duration;
-				convert->author = author;
+				convert->author = textClean(author);
 				if (convert->pendingTill > 0 && pendingTill <= 0 && api()) api()->clearWebPageRequest(convert);
 				convert->pendingTill = pendingTill;
 				if (App::main()) App::main()->webPageUpdated(convert);
 			}
 		}
-		WebPagesData::const_iterator i = webPagesData.constFind(webPage);
+		auto i = webPagesData.constFind(webPage);
 		WebPageData *result;
 		if (i == webPagesData.cend()) {
 			if (convert) {
@@ -1809,15 +1818,15 @@ namespace {
 			if (result != convert) {
 				if ((result->url.isEmpty() && !url.isEmpty()) || (result->pendingTill && result->pendingTill != pendingTill && pendingTill >= -1)) {
 					result->type = toWebPageType(type);
-					result->url = url;
-					result->displayUrl = displayUrl;
-					result->siteName = siteName;
-					result->title = title;
-					result->description = description;
+					result->url = textClean(url);
+					result->displayUrl = textClean(displayUrl);
+					result->siteName = textClean(siteName);
+					result->title = textOneLine(textClean(title));
+					result->description = textClean(description);
 					result->photo = photo;
 					result->document = document;
 					result->duration = duration;
-					result->author = author;
+					result->author = textClean(author);
 					if (result->pendingTill > 0 && pendingTill <= 0 && api()) api()->clearWebPageRequest(result);
 					result->pendingTill = pendingTill;
 					if (App::main()) App::main()->webPageUpdated(result);
@@ -1827,8 +1836,62 @@ namespace {
 		return result;
 	}
 
+	GameData *game(const GameId &game) {
+		auto i = gamesData.constFind(game);
+		if (i == gamesData.cend()) {
+			i = gamesData.insert(game, new GameData(game));
+		}
+		return i.value();
+	}
+
+	GameData *gameSet(const GameId &game, GameData *convert, const uint64 &accessHash, const QString &shortName, const QString &title, const QString &description, PhotoData *photo, DocumentData *document) {
+		if (convert) {
+			if (convert->id != game) {
+				auto i = gamesData.find(convert->id);
+				if (i != gamesData.cend() && i.value() == convert) {
+					gamesData.erase(i);
+				}
+				convert->id = game;
+				convert->accessHash = 0;
+			}
+			if (!convert->accessHash && accessHash) {
+				convert->accessHash = accessHash;
+				convert->shortName = textClean(shortName);
+				convert->title = textOneLine(textClean(title));
+				convert->description = textClean(description);
+				convert->photo = photo;
+				convert->document = document;
+				if (App::main()) App::main()->gameUpdated(convert);
+			}
+		}
+		auto i = gamesData.constFind(game);
+		GameData *result;
+		if (i == gamesData.cend()) {
+			if (convert) {
+				result = convert;
+			} else {
+				result = new GameData(game, accessHash, shortName, title, description, photo, document);
+			}
+			gamesData.insert(game, result);
+		} else {
+			result = i.value();
+			if (result != convert) {
+				if (!result->accessHash && accessHash) {
+					result->accessHash = accessHash;
+					result->shortName = textClean(shortName);
+					result->title = textOneLine(textClean(title));
+					result->description = textClean(description);
+					result->photo = photo;
+					result->document = document;
+					if (App::main()) App::main()->gameUpdated(result);
+				}
+			}
+		}
+		return result;
+	}
+
 	LocationData *location(const LocationCoords &coords) {
-		LocationsData::const_iterator i = locationsData.constFind(coords);
+		auto i = locationsData.constFind(coords);
 		if (i == locationsData.cend()) {
 			i = locationsData.insert(coords, new LocationData(coords));
 		}
@@ -1838,14 +1901,14 @@ namespace {
 	void forgetMedia() {
 		lastPhotos.clear();
 		lastPhotosMap.clear();
-		for (PhotosData::const_iterator i = ::photosData.cbegin(), e = ::photosData.cend(); i != e; ++i) {
-			i.value()->forget();
+		for_const (auto photo, ::photosData) {
+			photo->forget();
 		}
-		for (DocumentsData::const_iterator i = ::documentsData.cbegin(), e = ::documentsData.cend(); i != e; ++i) {
-			i.value()->forget();
+		for_const (auto document, ::documentsData) {
+			document->forget();
 		}
-		for (LocationsData::const_iterator i = ::locationsData.cbegin(), e = ::locationsData.cend(); i != e; ++i) {
-			i.value()->thumb->forget();
+		for_const (auto location, ::locationsData) {
+			location->thumb->forget();
 		}
 	}
 
@@ -1857,7 +1920,8 @@ namespace {
 			photoSizes.push_back(MTP_photoSize(MTP_string("a"), uphoto.vphoto_small, MTP_int(160), MTP_int(160), MTP_int(0)));
 			photoSizes.push_back(MTP_photoSize(MTP_string("c"), uphoto.vphoto_big, MTP_int(640), MTP_int(640), MTP_int(0)));
 
-			return MTP_photo(uphoto.vphoto_id, MTP_long(0), date, MTP_vector<MTPPhotoSize>(photoSizes));
+			MTPDphoto::Flags photoFlags = 0;
+			return MTP_photo(MTP_flags(photoFlags), uphoto.vphoto_id, MTP_long(0), date, MTP_vector<MTPPhotoSize>(photoSizes));
 		}
 		return MTP_photoEmpty(MTP_long(0));
 	}
@@ -1871,7 +1935,7 @@ namespace {
 	}
 
 	History *history(const PeerId &peer) {
-		return ::histories.findOrInsert(peer, 0, 0, 0);
+		return ::histories.findOrInsert(peer);
 	}
 
 	History *historyFromDialog(const PeerId &peer, int32 unreadCnt, int32 maxInboxRead, int32 maxOutboxRead) {
@@ -1885,7 +1949,7 @@ namespace {
 	HistoryItem *histItemById(ChannelId channelId, MsgId itemId) {
 		if (!itemId) return nullptr;
 
-		MsgsData *data = fetchMsgsData(channelId, false);
+		auto data = fetchMsgsData(channelId, false);
 		if (!data) return nullptr;
 
 		auto i = data->constFind(itemId);
@@ -1926,13 +1990,10 @@ namespace {
 		if (::mousedItem == item) {
 			mousedItem(nullptr);
 		}
-		if (App::wnd()) {
-			App::wnd()->notifyItemRemoved(item);
-		}
 	}
 
 	void historyUnregItem(HistoryItem *item) {
-		MsgsData *data = fetchMsgsData(item->channelId(), false);
+		auto data = fetchMsgsData(item->channelId(), false);
 		if (!data) return;
 
 		auto i = data->find(item->id);
@@ -1948,12 +2009,15 @@ namespace {
 			std::swap(items, j.value());
 			::dependentItems.erase(j);
 
-			for_const (HistoryItem *dependent, items) {
+			for_const (auto dependent, items) {
 				dependent->dependencyItemRemoved(item);
 			}
 		}
-		if (App::main() && !App::quitting()) {
-			App::main()->itemRemoved(item);
+		if (auto manager = Window::Notifications::manager()) {
+			manager->clearFromItem(item);
+		}
+		if (Global::started() && !App::quitting()) {
+			Global::RefItemRemoved().notify(item, true);
 		}
 	}
 
@@ -2002,22 +2066,28 @@ namespace {
 		cSetSavedPeers(SavedPeers());
 		cSetSavedPeersByTime(SavedPeersByTime());
 		cSetRecentInlineBots(RecentInlineBots());
-		for_const (PeerData *peer, peersData) {
+
+		for_const (auto peer, ::peersData) {
 			delete peer;
 		}
-		peersData.clear();
-		for_const (PhotoData *photo, ::photosData) {
+		::peersData.clear();
+		for_const (auto game, ::gamesData) {
+			delete game;
+		}
+		::gamesData.clear();
+		for_const (auto webpage, ::webPagesData) {
+			delete webpage;
+		}
+		::webPagesData.clear();
+		for_const (auto photo, ::photosData) {
 			delete photo;
 		}
 		::photosData.clear();
-		for_const (DocumentData *document, ::documentsData) {
+		for_const (auto document, ::documentsData) {
 			delete document;
 		}
 		::documentsData.clear();
-		for_const (WebPageData *webpage, webPagesData) {
-			delete webpage;
-		}
-		webPagesData.clear();
+
 		if (api()) api()->clearWebPageRequests();
 		cSetRecentStickers(RecentStickerPack());
 		Global::SetStickerSets(Stickers::Sets());
@@ -2025,7 +2095,10 @@ namespace {
 		Global::SetLastStickersUpdate(0);
 		Global::SetLastRecentStickersUpdate(0);
 		Global::SetFeaturedStickerSetsOrder(Stickers::Order());
-		Global::SetFeaturedStickerSetsUnreadCount(0);
+		if (Global::FeaturedStickerSetsUnreadCount() != 0) {
+			Global::SetFeaturedStickerSetsUnreadCount(0);
+			Global::RefFeaturedStickerSetsUnreadCountChanged().notify();
+		}
 		Global::SetLastFeaturedStickersUpdate(0);
 		Global::SetArchivedStickerSetsOrder(Stickers::Order());
 		cSetSavedGifs(SavedGifs());
@@ -2037,12 +2110,13 @@ namespace {
 		::photoItems.clear();
 		::documentItems.clear();
 		::webPageItems.clear();
+		::gameItems.clear();
 		::sharedContactItems.clear();
 		::gifItems.clear();
 		lastPhotos.clear();
 		lastPhotosMap.clear();
-		::self = 0;
-		if (App::wnd()) App::wnd()->updateGlobalMenu();
+		::self = nullptr;
+		Global::RefSelfChanged().notify(true);
 	}
 
 	void historyRegDependency(HistoryItem *dependent, HistoryItem *dependency) {
@@ -2089,21 +2163,22 @@ namespace {
 		text = d.second;
 	}
 
-	void prepareCorners(RoundCorners index, int32 radius, const style::color &color, const style::color *shadow = 0, QImage *cors = 0) {
+	void prepareCorners(RoundCorners index, int32 radius, const QBrush &brush, const style::color *shadow = nullptr, QImage *cors = nullptr) {
 		int32 r = radius * cIntRetinaFactor(), s = st::msgShadow * cIntRetinaFactor();
 		QImage rect(r * 3, r * 3 + (shadow ? s : 0), QImage::Format_ARGB32_Premultiplied), localCors[4];
 		{
-			QPainter p(&rect);
+			Painter p(&rect);
+			PainterHighQualityEnabler hq(p);
+
 			p.setCompositionMode(QPainter::CompositionMode_Source);
-			p.fillRect(QRect(0, 0, rect.width(), rect.height()), st::transparent->b);
+			p.fillRect(QRect(0, 0, rect.width(), rect.height()), Qt::transparent);
 			p.setCompositionMode(QPainter::CompositionMode_SourceOver);
-			p.setRenderHint(QPainter::HighQualityAntialiasing);
 			p.setPen(Qt::NoPen);
 			if (shadow) {
 				p.setBrush((*shadow)->b);
 				p.drawRoundedRect(0, s, r * 3, r * 3, r, r);
 			}
-			p.setBrush(color->b);
+			p.setBrush(brush);
 			p.drawRoundedRect(0, 0, r * 3, r * 3, r, r);
 		}
 		if (!cors) cors = localCors;
@@ -2127,9 +2202,75 @@ namespace {
 		}
 	}
 
-	void initMedia() {
-		audioInit();
+	int msgRadius() {
+		static int MsgRadius = ([]() {
+			return st::historyMessageRadius;
+			auto minMsgHeight = (st::msgPadding.top() + st::msgFont->height + st::msgPadding.bottom());
+			return minMsgHeight / 2;
+		})();
+		return MsgRadius;
+	}
 
+	void createCorners() {
+		QImage mask[4];
+		prepareCorners(LargeMaskCorners, msgRadius(), QColor(255, 255, 255), nullptr, mask);
+		for (int i = 0; i < 4; ++i) {
+			::cornersMaskLarge[i] = new QImage(mask[i].convertToFormat(QImage::Format_ARGB32_Premultiplied));
+			::cornersMaskLarge[i]->setDevicePixelRatio(cRetinaFactor());
+		}
+		prepareCorners(SmallMaskCorners, st::buttonRadius, QColor(255, 255, 255), nullptr, mask);
+		for (int i = 0; i < 4; ++i) {
+			::cornersMaskSmall[i] = new QImage(mask[i].convertToFormat(QImage::Format_ARGB32_Premultiplied));
+			::cornersMaskSmall[i]->setDevicePixelRatio(cRetinaFactor());
+		}
+		prepareCorners(MenuCorners, st::buttonRadius, st::menuBg);
+		prepareCorners(BoxCorners, st::boxRadius, st::boxBg);
+		prepareCorners(BotKbOverCorners, st::dateRadius, st::msgBotKbOverBgAdd);
+		prepareCorners(StickerCorners, st::dateRadius, st::msgServiceBg);
+		prepareCorners(StickerSelectedCorners, st::dateRadius, st::msgServiceBgSelected);
+		prepareCorners(SelectedOverlaySmallCorners, st::buttonRadius, st::msgSelectOverlay);
+		prepareCorners(SelectedOverlayLargeCorners, msgRadius(), st::msgSelectOverlay);
+		prepareCorners(DateCorners, st::dateRadius, st::msgDateImgBg);
+		prepareCorners(DateSelectedCorners, st::dateRadius, st::msgDateImgBgSelected);
+		prepareCorners(InShadowCorners, msgRadius(), st::msgInShadow);
+		prepareCorners(InSelectedShadowCorners, msgRadius(), st::msgInShadowSelected);
+		prepareCorners(ForwardCorners, msgRadius(), st::historyForwardChooseBg);
+		prepareCorners(MediaviewSaveCorners, st::mediaviewControllerRadius, st::mediaviewSaveMsgBg);
+		prepareCorners(EmojiHoverCorners, st::buttonRadius, st::emojiPanHover);
+		prepareCorners(StickerHoverCorners, st::buttonRadius, st::emojiPanHover);
+		prepareCorners(BotKeyboardCorners, st::buttonRadius, st::botKbBg);
+		prepareCorners(BotKeyboardOverCorners, st::buttonRadius, st::botKbOverBg);
+		prepareCorners(BotKeyboardDownCorners, st::buttonRadius, st::botKbDownBg);
+		prepareCorners(PhotoSelectOverlayCorners, st::buttonRadius, st::overviewPhotoSelectOverlay);
+
+		prepareCorners(Doc1Corners, st::buttonRadius, st::msgFile1Bg);
+		prepareCorners(Doc2Corners, st::buttonRadius, st::msgFile2Bg);
+		prepareCorners(Doc3Corners, st::buttonRadius, st::msgFile3Bg);
+		prepareCorners(Doc4Corners, st::buttonRadius, st::msgFile4Bg);
+
+		prepareCorners(MessageInCorners, msgRadius(), st::msgInBg, &st::msgInShadow);
+		prepareCorners(MessageInSelectedCorners, msgRadius(), st::msgInBgSelected, &st::msgInShadowSelected);
+		prepareCorners(MessageOutCorners, msgRadius(), st::msgOutBg, &st::msgOutShadow);
+		prepareCorners(MessageOutSelectedCorners, msgRadius(), st::msgOutBgSelected, &st::msgOutShadowSelected);
+	}
+
+	void clearCorners() {
+		for (int j = 0; j < 4; ++j) {
+			for (int i = 0; i < RoundCornersCount; ++i) {
+				delete ::corners[i].p[j]; ::corners[i].p[j] = nullptr;
+			}
+			delete ::cornersMaskSmall[j]; ::cornersMaskSmall[j] = nullptr;
+			delete ::cornersMaskLarge[j]; ::cornersMaskLarge[j] = nullptr;
+		}
+		for (auto i = ::cornersMap.cbegin(), e = ::cornersMap.cend(); i != e; ++i) {
+			for (int j = 0; j < 4; ++j) {
+				delete i->p[j];
+			}
+		}
+		::cornersMap.clear();
+	}
+
+	void initMedia() {
 		if (!::monofont) {
 			QString family;
 			tryFontFamily(family, qsl("Consolas"));
@@ -2149,44 +2290,32 @@ namespace {
 			if (cRetina()) ::emojiLarge->setDevicePixelRatio(cRetinaFactor());
 		}
 
-		QImage mask[4];
-		prepareCorners(LargeMaskCorners, st::msgRadius, st::white, nullptr, mask);
-		for (int i = 0; i < 4; ++i) {
-			::cornersMaskLarge[i] = new QImage(mask[i].convertToFormat(QImage::Format_ARGB32_Premultiplied));
-			::cornersMaskLarge[i]->setDevicePixelRatio(cRetinaFactor());
-		}
-		prepareCorners(SmallMaskCorners, st::buttonRadius, st::white, nullptr, mask);
-		for (int i = 0; i < 4; ++i) {
-			::cornersMaskSmall[i] = new QImage(mask[i].convertToFormat(QImage::Format_ARGB32_Premultiplied));
-			::cornersMaskSmall[i]->setDevicePixelRatio(cRetinaFactor());
-		}
-		prepareCorners(WhiteCorners, st::dateRadius, st::white);
-		prepareCorners(StickerCorners, st::dateRadius, st::msgServiceBg);
-		prepareCorners(StickerSelectedCorners, st::dateRadius, st::msgServiceSelectBg);
-		prepareCorners(SelectedOverlaySmallCorners, st::buttonRadius, st::msgSelectOverlay);
-		prepareCorners(SelectedOverlayLargeCorners, st::msgRadius, st::msgSelectOverlay);
-		prepareCorners(DateCorners, st::dateRadius, st::msgDateImgBg);
-		prepareCorners(DateSelectedCorners, st::dateRadius, st::msgDateImgBgSelected);
-		prepareCorners(InShadowCorners, st::msgRadius, st::msgInShadow);
-		prepareCorners(InSelectedShadowCorners, st::msgRadius, st::msgInShadowSelected);
-		prepareCorners(ForwardCorners, st::msgRadius, st::forwardBg);
-		prepareCorners(MediaviewSaveCorners, st::mediaviewControllerRadius, st::medviewSaveMsg);
-		prepareCorners(EmojiHoverCorners, st::buttonRadius, st::emojiPanHover);
-		prepareCorners(StickerHoverCorners, st::buttonRadius, st::emojiPanHover);
-		prepareCorners(BotKeyboardCorners, st::buttonRadius, st::botKbBg);
-		prepareCorners(BotKeyboardOverCorners, st::buttonRadius, st::botKbOverBg);
-		prepareCorners(BotKeyboardDownCorners, st::buttonRadius, st::botKbDownBg);
-		prepareCorners(PhotoSelectOverlayCorners, st::buttonRadius, st::overviewPhotoSelectOverlay);
+		createCorners();
 
-		prepareCorners(DocBlueCorners, st::buttonRadius, st::msgFileBlueColor);
-		prepareCorners(DocGreenCorners, st::buttonRadius, st::msgFileGreenColor);
-		prepareCorners(DocRedCorners, st::buttonRadius, st::msgFileRedColor);
-		prepareCorners(DocYellowCorners, st::buttonRadius, st::msgFileYellowColor);
+		using Update = Window::Theme::BackgroundUpdate;
+		static auto subscription = Window::Theme::Background()->add_subscription([](const Update &update) {
+			if (update.paletteChanged()) {
+				clearCorners();
+				createCorners();
 
-		prepareCorners(MessageInCorners, st::msgRadius, st::msgInBg, &st::msgInShadow);
-		prepareCorners(MessageInSelectedCorners, st::msgRadius, st::msgInBgSelected, &st::msgInShadowSelected);
-		prepareCorners(MessageOutCorners, st::msgRadius, st::msgOutBg, &st::msgOutShadow);
-		prepareCorners(MessageOutSelectedCorners, st::msgRadius, st::msgOutBgSelected, &st::msgOutShadowSelected);
+				if (App::main()) {
+					App::main()->updateScrollColors();
+				}
+				HistoryLayout::serviceColorsUpdated();
+			} else if (update.type == Update::Type::New) {
+				for (int i = 0; i < 4; ++i) {
+					delete ::corners[StickerCorners].p[i]; ::corners[StickerCorners].p[i] = nullptr;
+					delete ::corners[StickerSelectedCorners].p[i]; ::corners[StickerSelectedCorners].p[i] = nullptr;
+				}
+				prepareCorners(StickerCorners, st::dateRadius, st::msgServiceBg);
+				prepareCorners(StickerSelectedCorners, st::dateRadius, st::msgServiceBgSelected);
+
+				if (App::main()) {
+					App::main()->updateScrollColors();
+				}
+				HistoryLayout::serviceColorsUpdated();
+			}
+		});
 	}
 
 	void clearHistories() {
@@ -2202,25 +2331,13 @@ namespace {
 	}
 
 	void deinitMedia() {
-		audioFinish();
-
 		delete ::emoji;
-		::emoji = 0;
+		::emoji = nullptr;
 		delete ::emojiLarge;
-		::emojiLarge = 0;
-		for (int32 j = 0; j < 4; ++j) {
-			for (int32 i = 0; i < RoundCornersCount; ++i) {
-				delete ::corners[i].p[j]; ::corners[i].p[j] = nullptr;
-			}
-			delete ::cornersMaskSmall[j]; ::cornersMaskSmall[j] = nullptr;
-			delete ::cornersMaskLarge[j]; ::cornersMaskLarge[j] = nullptr;
-		}
-		for (CornersMap::const_iterator i = ::cornersMap.cbegin(), e = ::cornersMap.cend(); i != e; ++i) {
-			for (int32 j = 0; j < 4; ++j) {
-				delete i->p[j];
-			}
-		}
-		::cornersMap.clear();
+		::emojiLarge = nullptr;
+
+		clearCorners();
+
 		mainEmojiMap.clear();
 		otherEmojiMap.clear();
 
@@ -2290,10 +2407,6 @@ namespace {
 		return ::monofont;
 	}
 
-	const QPixmap &sprite() {
-		return style::spritePixmap();
-	}
-
 	const QPixmap &emoji() {
 		return *::emoji;
 	}
@@ -2303,7 +2416,7 @@ namespace {
 	}
 
 	const QPixmap &emojiSingle(EmojiPtr emoji, int32 fontHeight) {
-		EmojiMap *map = &(fontHeight == st::taDefFlat.font->height ? mainEmojiMap : otherEmojiMap[fontHeight]);
+		EmojiMap *map = &(fontHeight == st::msgFont->height ? mainEmojiMap : otherEmojiMap[fontHeight]);
 		EmojiMap::const_iterator i = map->constFind(emojiKey(emoji));
 		if (i == map->cend()) {
 			QImage img(ESize + st::emojiPadding * cIntRetinaFactor() * 2, fontHeight * cIntRetinaFactor(), QImage::Format_ARGB32_Premultiplied);
@@ -2322,7 +2435,9 @@ namespace {
 	}
 
 	void playSound() {
-		if (cSoundNotify() && !psSkipAudioNotify()) audioPlayNotify();
+		if (Global::SoundNotify() && !Platform::Notifications::skipAudio()) {
+			audioPlayNotify();
+		}
 	}
 
 	void checkImageCacheSize() {
@@ -2378,6 +2493,21 @@ namespace {
 		_launchState = state;
 	}
 
+	void restart() {
+#ifndef TDESKTOP_DISABLE_AUTOUPDATE
+		bool updateReady = (Sandbox::updatingState() == Application::UpdatingReady);
+#else // !TDESKTOP_DISABLE_AUTOUPDATE
+		bool updateReady = false;
+#endif // else for !TDESKTOP_DISABLE_AUTOUPDATE
+		if (updateReady) {
+			cSetRestartingUpdate(true);
+		} else {
+			cSetRestarting(true);
+			cSetRestartingToSettings(true);
+		}
+		App::quit();
+	}
+
 	QImage readImage(QByteArray data, QByteArray *format, bool opaque, bool *animated) {
         QByteArray tmpFormat;
 		QImage result;
@@ -2387,9 +2517,9 @@ namespace {
         }
 		{
 			QImageReader reader(&buffer, *format);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
+#ifndef OS_MAC_OLD
 			reader.setAutoTransform(true);
-#endif
+#endif // OS_MAC_OLD
 			if (animated) *animated = reader.supportsAnimation() && reader.imageCount() > 1;
 			QByteArray fmt = reader.format();
 			if (!fmt.isEmpty()) *format = fmt;
@@ -2400,59 +2530,56 @@ namespace {
 			if (!fmt.isEmpty()) *format = fmt;
 		}
 		buffer.seek(0);
-        QString fmt = QString::fromUtf8(*format).toLower();
+		auto fmt = QString::fromUtf8(*format).toLower();
 		if (fmt == "jpg" || fmt == "jpeg") {
-#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
-			ExifData *exifData = exif_data_new_from_data((const uchar*)(data.constData()), data.size());
-			if (exifData) {
-				ExifByteOrder byteOrder = exif_data_get_byte_order(exifData);
-				ExifEntry *exifEntry = exif_data_get_entry(exifData, EXIF_TAG_ORIENTATION);
-				if (exifEntry) {
-					QTransform orientationFix;
-					int orientation = exif_get_short(exifEntry->data, byteOrder);
-					switch (orientation) {
-					case 2: orientationFix = QTransform(-1, 0, 0, 1, 0, 0); break;
-					case 3: orientationFix = QTransform(-1, 0, 0, -1, 0, 0); break;
-					case 4: orientationFix = QTransform(1, 0, 0, -1, 0, 0); break;
-					case 5: orientationFix = QTransform(0, -1, -1, 0, 0, 0); break;
-					case 6: orientationFix = QTransform(0, 1, -1, 0, 0, 0); break;
-					case 7: orientationFix = QTransform(0, 1, 1, 0, 0, 0); break;
-					case 8: orientationFix = QTransform(0, -1, 1, 0, 0, 0); break;
-					}
-					result = result.transformed(orientationFix);
+#ifdef OS_MAC_OLD
+			if (auto exifData = exif_data_new_from_data((const uchar*)(data.constData()), data.size())) {
+				auto byteOrder = exif_data_get_byte_order(exifData);
+				if (auto exifEntry = exif_data_get_entry(exifData, EXIF_TAG_ORIENTATION)) {
+					auto orientationFix = [exifEntry, byteOrder] {
+						auto orientation = exif_get_short(exifEntry->data, byteOrder);
+						switch (orientation) {
+						case 2: return QTransform(-1, 0, 0, 1, 0, 0);
+						case 3: return QTransform(-1, 0, 0, -1, 0, 0);
+						case 4: return QTransform(1, 0, 0, -1, 0, 0);
+						case 5: return QTransform(0, -1, -1, 0, 0, 0);
+						case 6: return QTransform(0, 1, -1, 0, 0, 0);
+						case 7: return QTransform(0, 1, 1, 0, 0, 0);
+						case 8: return QTransform(0, -1, 1, 0, 0, 0);
+						}
+						return QTransform();
+					};
+					result = result.transformed(orientationFix());
 				}
 				exif_data_free(exifData);
 			}
-#endif
-		} else if (opaque && result.hasAlphaChannel()) {
-			QImage solid(result.width(), result.height(), QImage::Format_ARGB32_Premultiplied);
-			solid.fill(st::white->c);
-			{
-				QPainter(&solid).drawImage(0, 0, result);
-			}
-			result = solid;
+#endif // OS_MAC_OLD
+		} else if (opaque) {
+			result = Images::prepareOpaque(std_::move(result));
 		}
 		return result;
 	}
 
 	QImage readImage(const QString &file, QByteArray *format, bool opaque, bool *animated, QByteArray *content) {
 		QFile f(file);
-		if (!f.open(QIODevice::ReadOnly)) {
+		if (f.size() > kImageSizeLimit || !f.open(QIODevice::ReadOnly)) {
 			if (animated) *animated = false;
 			return QImage();
 		}
-		QByteArray img = f.readAll();
-		QImage result = readImage(img, format, opaque, animated);
-		if (content && !result.isNull()) *content = img;
+		auto imageBytes = f.readAll();
+		auto result = readImage(imageBytes, format, opaque, animated);
+		if (content && !result.isNull()) {
+			*content = imageBytes;
+		}
 		return result;
 	}
 
 	QPixmap pixmapFromImageInPlace(QImage &&image) {
-		return QPixmap::fromImage(std_::forward<QImage>(image), Qt::ColorOnly);
+		return QPixmap::fromImage(std_::move(image), Qt::ColorOnly);
 	}
 
 	void regPhotoItem(PhotoData *data, HistoryItem *item) {
-		::photoItems[data].insert(item, NullType());
+		::photoItems[data].insert(item);
 	}
 
 	void unregPhotoItem(PhotoData *data, HistoryItem *item) {
@@ -2468,7 +2595,7 @@ namespace {
 	}
 
 	void regDocumentItem(DocumentData *data, HistoryItem *item) {
-		::documentItems[data].insert(item, NullType());
+		::documentItems[data].insert(item);
 	}
 
 	void unregDocumentItem(DocumentData *data, HistoryItem *item) {
@@ -2484,7 +2611,7 @@ namespace {
 	}
 
 	void regWebPageItem(WebPageData *data, HistoryItem *item) {
-		::webPageItems[data].insert(item, NullType());
+		::webPageItems[data].insert(item);
 	}
 
 	void unregWebPageItem(WebPageData *data, HistoryItem *item) {
@@ -2495,10 +2622,22 @@ namespace {
 		return ::webPageItems;
 	}
 
+	void regGameItem(GameData *data, HistoryItem *item) {
+		::gameItems[data].insert(item);
+	}
+
+	void unregGameItem(GameData *data, HistoryItem *item) {
+		::gameItems[data].remove(item);
+	}
+
+	const GameItems &gameItems() {
+		return ::gameItems;
+	}
+
 	void regSharedContactItem(int32 userId, HistoryItem *item) {
 		auto user = App::userLoaded(userId);
 		auto canShareThisContact = user ? user->canShareThisContact() : false;
-		::sharedContactItems[userId].insert(item, NullType());
+		::sharedContactItems[userId].insert(item);
 		if (canShareThisContact != (user ? user->canShareThisContact() : false)) {
 			Notify::peerUpdatedDelayed(user, Notify::PeerUpdate::Flag::UserCanShareContact);
 		}
@@ -2537,11 +2676,12 @@ namespace {
 	}
 
 	QString phoneFromSharedContact(int32 userId) {
-		SharedContactItems::const_iterator i = ::sharedContactItems.constFind(userId);
+		auto i = ::sharedContactItems.constFind(userId);
 		if (i != ::sharedContactItems.cend() && !i->isEmpty()) {
-			HistoryMedia *media = i->cbegin().key()->getMedia();
-			if (media && media->type() == MediaTypeContact) {
-				return static_cast<HistoryContact*>(media)->phone();
+			if (auto media = (*i->cbegin())->getMedia()) {
+				if (media->type() == MediaTypeContact) {
+					return static_cast<HistoryContact*>(media)->phone();
+				}
 			}
 		}
 		return QString();
@@ -2578,33 +2718,64 @@ namespace {
 	void setProxySettings(QNetworkAccessManager &manager) {
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 		manager.setProxy(getHttpProxySettings());
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 	}
 
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	QNetworkProxy getHttpProxySettings() {
-		const ConnectionProxy *proxy = 0;
+		const ProxyData *proxy = nullptr;
 		if (Global::started()) {
-			proxy = (cConnectionType() == dbictHttpProxy) ? (&cConnectionProxy()) : 0;
+			proxy = (Global::ConnectionType() == dbictHttpProxy) ? (&Global::ConnectionProxy()) : nullptr;
 		} else {
-			proxy = Sandbox::PreLaunchProxy().host.isEmpty() ? 0 : (&Sandbox::PreLaunchProxy());
+			proxy = Sandbox::PreLaunchProxy().host.isEmpty() ? nullptr : (&Sandbox::PreLaunchProxy());
 		}
 		if (proxy) {
 			return QNetworkProxy(QNetworkProxy::HttpProxy, proxy->host, proxy->port, proxy->user, proxy->password);
 		}
 		return QNetworkProxy(QNetworkProxy::DefaultProxy);
 	}
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 
 	void setProxySettings(QTcpSocket &socket) {
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
-		if (cConnectionType() == dbictTcpProxy) {
-			const ConnectionProxy &p(cConnectionProxy());
+		if (Global::ConnectionType() == dbictTcpProxy) {
+			auto &p = Global::ConnectionProxy();
 			socket.setProxy(QNetworkProxy(QNetworkProxy::Socks5Proxy, p.host, p.port, p.user, p.password));
 		} else {
 			socket.setProxy(QNetworkProxy(QNetworkProxy::NoProxy));
 		}
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
+	}
+
+	void complexAdjustRect(ImageRoundCorners corners, QRect &rect, RectParts &parts) {
+		if (corners & ImageRoundCorner::TopLeft) {
+			if (!(corners & ImageRoundCorner::BottomLeft)) {
+				parts = RectPart::NoTopBottom | RectPart::TopFull;
+				rect.setHeight(rect.height() + msgRadius());
+			}
+		} else if (corners & ImageRoundCorner::BottomLeft) {
+			parts = RectPart::NoTopBottom | RectPart::BottomFull;
+			rect.setTop(rect.y() - msgRadius());
+		} else {
+			parts = RectPart::NoTopBottom;
+			rect.setTop(rect.y() - msgRadius());
+			rect.setHeight(rect.height() + msgRadius());
+		}
+	}
+
+	void complexOverlayRect(Painter &p, QRect rect, ImageRoundRadius radius, ImageRoundCorners corners) {
+		auto overlayCorners = (radius == ImageRoundRadius::Small) ? SelectedOverlaySmallCorners : SelectedOverlayLargeCorners;
+		auto overlayParts = RectPart::Full | RectPart::None;
+		if (radius == ImageRoundRadius::Large) {
+			complexAdjustRect(corners, rect, overlayParts);
+		}
+		roundRect(p, rect, p.textPalette().selectOverlay, overlayCorners, nullptr, overlayParts);
+	}
+
+	void complexLocationRect(Painter &p, QRect rect, ImageRoundRadius radius, ImageRoundCorners corners) {
+		auto parts = RectPart::Full | RectPart::None;
+		complexAdjustRect(corners, rect, parts);
+		roundRect(p, rect, st::msgInBg, MessageInCorners, nullptr, parts);
 	}
 
 	QImage **cornersMask(ImageRoundRadius radius) {
@@ -2615,45 +2786,80 @@ namespace {
 		}
 		return ::cornersMaskSmall;
 	}
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, const CornersPixmaps &c, const style::color *sh) {
-		int32 cw = c.p[0]->width() / cIntRetinaFactor(), ch = c.p[0]->height() / cIntRetinaFactor();
-		if (w < 2 * cw || h < 2 * ch) return;
-		if (w > 2 * cw) {
-			p.fillRect(QRect(x + cw, y, w - 2 * cw, ch), bg->b);
-			p.fillRect(QRect(x + cw, y + h - ch, w - 2 * cw, ch), bg->b);
-			if (sh) p.fillRect(QRect(x + cw, y + h, w - 2 * cw, st::msgShadow), (*sh)->b);
+
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, const CornersPixmaps &corner, const style::color *shadow, RectParts parts) {
+		auto cornerWidth = corner.p[0]->width() / cIntRetinaFactor();
+		auto cornerHeight = corner.p[0]->height() / cIntRetinaFactor();
+		if (w < 2 * cornerWidth || h < 2 * cornerHeight) return;
+		if (w > 2 * cornerWidth) {
+			if (parts & RectPart::Top) {
+				p.fillRect(x + cornerWidth, y, w - 2 * cornerWidth, cornerHeight, bg);
+			}
+			if (parts & RectPart::Bottom) {
+				p.fillRect(x + cornerWidth, y + h - cornerHeight, w - 2 * cornerWidth, cornerHeight, bg);
+				if (shadow) {
+					p.fillRect(x + cornerWidth, y + h, w - 2 * cornerWidth, st::msgShadow, *shadow);
+				}
+			}
 		}
-		if (h > 2 * ch) {
-			p.fillRect(QRect(x, y + ch, w, h - 2 * ch), bg->b);
+		if (h > 2 * cornerHeight) {
+			if ((parts & RectPart::NoTopBottom) == qFlags(RectPart::NoTopBottom)) {
+				p.fillRect(x, y + cornerHeight, w, h - 2 * cornerHeight, bg);
+			} else {
+				if (parts & RectPart::Left) {
+					p.fillRect(x, y + cornerHeight, cornerWidth, h - 2 * cornerHeight, bg);
+				}
+				if ((parts & RectPart::Center) && w > 2 * cornerWidth) {
+					p.fillRect(x + cornerWidth, y + cornerHeight, w - 2 * cornerWidth, h - 2 * cornerHeight, bg);
+				}
+				if (parts & RectPart::Right) {
+					p.fillRect(x + w - cornerWidth, y + cornerHeight, cornerWidth, h - 2 * cornerHeight, bg);
+				}
+			}
 		}
-		p.drawPixmap(QPoint(x, y), *c.p[0]);
-		p.drawPixmap(QPoint(x + w - cw, y), *c.p[1]);
-		p.drawPixmap(QPoint(x, y + h - ch), *c.p[2]);
-		p.drawPixmap(QPoint(x + w - cw, y + h - ch), *c.p[3]);
+		if (parts & RectPart::TopLeft) {
+			p.drawPixmap(x, y, *corner.p[0]);
+		}
+		if (parts & RectPart::TopRight) {
+			p.drawPixmap(x + w - cornerWidth, y, *corner.p[1]);
+		}
+		if (parts & RectPart::BottomLeft) {
+			p.drawPixmap(x, y + h - cornerHeight, *corner.p[2]);
+		}
+		if (parts & RectPart::BottomRight) {
+			p.drawPixmap(x + w - cornerWidth, y + h - cornerHeight, *corner.p[3]);
+		}
 	}
 
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, RoundCorners index, const style::color *sh) {
-		roundRect(p, x, y, w, h, bg, ::corners[index], sh);
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, RoundCorners index, const style::color *shadow, RectParts parts) {
+		roundRect(p, x, y, w, h, bg, ::corners[index], shadow, parts);
 	}
 
-	void roundShadow(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &sh, RoundCorners index) {
-		const CornersPixmaps &c = ::corners[index];
-		int32 cw = c.p[0]->width() / cIntRetinaFactor(), ch = c.p[0]->height() / cIntRetinaFactor();
-		p.fillRect(x + cw, y + h, w - 2 * cw, st::msgShadow, sh->b);
-		p.fillRect(x, y + h - ch, cw, st::msgShadow, sh->b);
-		p.fillRect(x + w - cw, y + h - ch, cw, st::msgShadow, sh->b);
-		p.drawPixmap(x, y + h - ch + st::msgShadow, *c.p[2]);
-		p.drawPixmap(x + w - cw, y + h - ch + st::msgShadow, *c.p[3]);
+	void roundShadow(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color shadow, RoundCorners index, RectParts parts) {
+		auto &corner = ::corners[index];
+		auto cornerWidth = corner.p[0]->width() / cIntRetinaFactor();
+		auto cornerHeight = corner.p[0]->height() / cIntRetinaFactor();
+		if (parts & RectPart::Bottom) {
+			p.fillRect(x + cornerWidth, y + h, w - 2 * cornerWidth, st::msgShadow, shadow);
+		}
+		if (parts & RectPart::BottomLeft) {
+			p.fillRect(x, y + h - cornerHeight, cornerWidth, st::msgShadow, shadow);
+			p.drawPixmap(x, y + h - cornerHeight + st::msgShadow, *corner.p[2]);
+		}
+		if (parts & RectPart::BottomRight) {
+			p.fillRect(x + w - cornerWidth, y + h - cornerHeight, cornerWidth, st::msgShadow, shadow);
+			p.drawPixmap(x + w - cornerWidth, y + h - cornerHeight + st::msgShadow, *corner.p[3]);
+		}
 	}
 
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, ImageRoundRadius radius) {
-		uint32 colorKey = ((uint32(bg->c.alpha()) & 0xFF) << 24) | ((uint32(bg->c.red()) & 0xFF) << 16) | ((uint32(bg->c.green()) & 0xFF) << 8) | ((uint32(bg->c.blue()) & 0xFF) << 24);
-		CornersMap::const_iterator i = cornersMap.find(colorKey);
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, ImageRoundRadius radius, RectParts parts) {
+		auto colorKey = ((uint32(bg->c.alpha()) & 0xFF) << 24) | ((uint32(bg->c.red()) & 0xFF) << 16) | ((uint32(bg->c.green()) & 0xFF) << 8) | ((uint32(bg->c.blue()) & 0xFF) << 24);
+		auto i = cornersMap.find(colorKey);
 		if (i == cornersMap.cend()) {
 			QImage images[4];
 			switch (radius) {
 			case ImageRoundRadius::Small: prepareCorners(SmallMaskCorners, st::buttonRadius, bg, nullptr, images); break;
-			case ImageRoundRadius::Large: prepareCorners(LargeMaskCorners, st::msgRadius, bg, nullptr, images); break;
+			case ImageRoundRadius::Large: prepareCorners(LargeMaskCorners, msgRadius(), bg, nullptr, images); break;
 			default: p.fillRect(x, y, w, h, bg); return;
 			}
 
@@ -2664,215 +2870,7 @@ namespace {
 			}
 			i = cornersMap.insert(colorKey, pixmaps);
 		}
-		roundRect(p, x, y, w, h, bg, i.value(), 0);
-	}
-
-	void initBackground(int32 id, const QImage &p, bool nowrite) {
-		if (Local::readBackground()) return;
-
-		uint64 components[3] = { 0 }, componentsScroll[3] = { 0 }, componentsPoint[3] = { 0 };
-		int size = 0;
-		{
-			QImage img(p);
-			bool remove = false;
-			if (p.isNull()) {
-				if (id == DefaultChatBackground) {
-					img.load(st::msgBG);
-				} else {
-					img.load(st::msgBG0);
-					if (cRetina()) {
-						img = img.scaledToWidth(img.width() * 2, Qt::SmoothTransformation);
-					} else if (cScale() != dbisOne) {
-						img = img.scaledToWidth(convertScale(img.width()), Qt::SmoothTransformation);
-					}
-					id = 0;
-				}
-				remove = true;
-			}
-			if (img.format() != QImage::Format_ARGB32 && img.format() != QImage::Format_ARGB32_Premultiplied && img.format() != QImage::Format_RGB32) {
-				img = img.convertToFormat(QImage::Format_RGB32);
-			}
-			img.setDevicePixelRatio(cRetinaFactor());
-
-			if (!nowrite) {
-				Local::writeBackground(id, remove ? QImage() : img);
-			}
-
-			int w = img.width(), h = img.height();
-			size = w * h;
-			const uchar *pix = img.constBits();
-			if (pix) {
-				for (int32 i = 0, l = size * 4; i < l; i += 4) {
-					components[2] += pix[i + 0];
-					components[1] += pix[i + 1];
-					components[0] += pix[i + 2];
-				}
-			}
-
-			delete cChatBackground();
-			cSetChatBackground(new QPixmap(pixmapFromImageInPlace(std_::move(img))));
-			cSetChatBackgroundId(id);
-
-			if (App::main()) App::main()->clearCachedBackground();
-
-		}
-		if (size) {
-			for (int32 i = 0; i < 3; ++i) components[i] /= size;
-		}
-		int maxtomin[3] = { 0, 1, 2 };
-		if (components[maxtomin[0]] < components[maxtomin[1]]) {
-			qSwap(maxtomin[0], maxtomin[1]);
-		}
-		if (components[maxtomin[1]] < components[maxtomin[2]]) {
-			qSwap(maxtomin[1], maxtomin[2]);
-			if (components[maxtomin[0]] < components[maxtomin[1]]) {
-				qSwap(maxtomin[0], maxtomin[1]);
-			}
-		}
-
-		uint64 max = qMax(1ULL, components[maxtomin[0]]), mid = qMax(1ULL, components[maxtomin[1]]), min = qMax(1ULL, components[maxtomin[2]]);
-
-		{
-			QImage dog = App::sprite().toImage().copy(st::msgDogImg.rect());
-			QImage::Format f = dog.format();
-			if (f != QImage::Format_ARGB32 && f != QImage::Format_ARGB32_Premultiplied) {
-				dog = dog.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-			}
-			uchar *dogBits = dog.bits();
-			if (max != min) {
-				float64 coef = float64(mid - min) / float64(max - min);
-				for (int i = 0, s = dog.width() * dog.height() * 4; i < s; i += 4) {
-					int dogmaxtomin[3] = { i, i + 1, i + 2 };
-					if (dogBits[dogmaxtomin[0]] < dogBits[dogmaxtomin[1]]) {
-						qSwap(dogmaxtomin[0], dogmaxtomin[1]);
-					}
-					if (dogBits[dogmaxtomin[1]] < dogBits[dogmaxtomin[2]]) {
-						qSwap(dogmaxtomin[1], dogmaxtomin[2]);
-						if (dogBits[dogmaxtomin[0]] < dogBits[dogmaxtomin[1]]) {
-							qSwap(dogmaxtomin[0], dogmaxtomin[1]);
-						}
-					}
-					uchar result[3];
-					result[maxtomin[0]] = dogBits[dogmaxtomin[0]];
-					result[maxtomin[2]] = dogBits[dogmaxtomin[2]];
-					result[maxtomin[1]] = uchar(qRound(result[maxtomin[2]] + (result[maxtomin[0]] - result[maxtomin[2]]) * coef));
-					dogBits[i] = result[2];
-					dogBits[i + 1] = result[1];
-					dogBits[i + 2] = result[0];
-				}
-			} else {
-				for (int i = 0, s = dog.width() * dog.height() * 4; i < s; i += 4) {
-					uchar b = dogBits[i], g = dogBits[i + 1], r = dogBits[i + 2];
-					dogBits[i] = dogBits[i + 1] = dogBits[i + 2] = (r + r + b + g + g + g) / 6;
-				}
-			}
-			delete cChatDogImage();
-			cSetChatDogImage(new QPixmap(pixmapFromImageInPlace(std_::move(dog))));
-		}
-
-		memcpy(componentsScroll, components, sizeof(components));
-		memcpy(componentsPoint, components, sizeof(components));
-
-		if (max != min) {
-			if (min > uint64(qRound(0.77 * max))) {
-				uint64 newmin = qRound(0.77 * max); // min saturation 23%
-				uint64 newmid = max - ((max - mid) * (max - newmin)) / (max - min);
-				components[maxtomin[1]] = newmid;
-				components[maxtomin[2]] = newmin;
-			}
-			uint64 newmin = qRound(0.77 * max); // saturation 23% for scroll
-			uint64 newmid = max - ((max - mid) * (max - newmin)) / (max - min);
-			componentsScroll[maxtomin[1]] = newmid;
-			componentsScroll[maxtomin[2]] = newmin;
-
-			uint64 pmax = 227; // 89% brightness
-			uint64 pmin = qRound(0.75 * pmax); // 41% saturation
-			uint64 pmid = pmax - ((max - mid) * (pmax - pmin)) / (max - min);
-			componentsPoint[maxtomin[0]] = pmax;
-			componentsPoint[maxtomin[1]] = pmid;
-			componentsPoint[maxtomin[2]] = pmin;
-		} else {
-			componentsPoint[0] = componentsPoint[1] = componentsPoint[2] = 227; // 89% brightness
-		}
-
-		float64 luminance = 0.299 * componentsScroll[0] + 0.587 * componentsScroll[1] + 0.114 * componentsScroll[2];
-		uint64 maxScroll = max;
-		if (luminance < 0.5 * 0xFF) {
-			maxScroll += qRound(0.2 * 0xFF);
-		} else {
-			maxScroll -= qRound(0.2 * 0xFF);
-		}
-		componentsScroll[maxtomin[2]] = qMin(uint64(float64(componentsScroll[maxtomin[2]]) * maxScroll / float64(componentsScroll[maxtomin[0]])), 0xFFULL);
-		componentsScroll[maxtomin[1]] = qMin(uint64(float64(componentsScroll[maxtomin[1]]) * maxScroll / float64(componentsScroll[maxtomin[0]])), 0xFFULL);
-		componentsScroll[maxtomin[0]] = qMin(maxScroll, 0xFFULL);
-
-        if (max > uint64(qRound(0.2 * 0xFF))) { // brightness greater than 20%
-			max -= qRound(0.2 * 0xFF);
-		} else {
-			max = 0;
-		}
-		components[maxtomin[2]] = uint64(float64(components[maxtomin[2]]) * max / float64(components[maxtomin[0]]));
-		components[maxtomin[1]] = uint64(float64(components[maxtomin[1]]) * max / float64(components[maxtomin[0]]));
-		components[maxtomin[0]] = max;
-
-		uchar r = uchar(components[0]), g = uchar(components[1]), b = uchar(components[2]);
-		float64 alpha = st::msgServiceBg->c.alphaF();
-		_msgServiceBg = style::color(r, g, b, qRound(alpha * 0xFF));
-
-		float64 alphaSel = st::msgServiceSelectBg->c.alphaF(), addSel = (1. - ((1. - alphaSel) / (1. - alpha))) * 0xFF;
-		uchar rsel = snap(qRound(((1. - alphaSel) * r + addSel) / alphaSel), 0, 0xFF);
-		uchar gsel = snap(qRound(((1. - alphaSel) * g + addSel) / alphaSel), 0, 0xFF);
-		uchar bsel = snap(qRound(((1. - alphaSel) * b + addSel) / alphaSel), 0, 0xFF);
-		_msgServiceSelectBg = style::color(r, g, b, qRound(alphaSel * 0xFF));
-
-		for (int i = 0; i < 4; ++i) {
-			delete ::corners[StickerCorners].p[i]; ::corners[StickerCorners].p[i] = nullptr;
-			delete ::corners[StickerSelectedCorners].p[i]; ::corners[StickerSelectedCorners].p[i] = nullptr;
-		}
-		prepareCorners(StickerCorners, st::dateRadius, _msgServiceBg);
-		prepareCorners(StickerSelectedCorners, st::dateRadius, _msgServiceSelectBg);
-
-		uchar rScroll = uchar(componentsScroll[0]), gScroll = uchar(componentsScroll[1]), bScroll = uchar(componentsScroll[2]);
-		_historyScrollBarColor = style::color(rScroll, gScroll, bScroll, qRound(st::historyScroll.barColor->c.alphaF() * 0xFF));
-		_historyScrollBgColor = style::color(rScroll, gScroll, bScroll, qRound(st::historyScroll.bgColor->c.alphaF() * 0xFF));
-		_historyScrollBarOverColor = style::color(rScroll, gScroll, bScroll, qRound(st::historyScroll.barOverColor->c.alphaF() * 0xFF));
-		_historyScrollBgOverColor = style::color(rScroll, gScroll, bScroll, qRound(st::historyScroll.bgOverColor->c.alphaF() * 0xFF));
-
-		uchar rPoint = uchar(componentsPoint[0]), gPoint = uchar(componentsPoint[1]), bPoint = uchar(componentsPoint[2]);
-		_introPointHoverColor = style::color(rPoint, gPoint, bPoint);
-
-		if (App::main()) {
-			App::main()->updateScrollColors();
-			HistoryLayout::serviceColorsUpdated();
-		}
-	}
-
-	const style::color &msgServiceBg() {
-		return _msgServiceBg;
-	}
-
-	const style::color &msgServiceSelectBg() {
-		return _msgServiceSelectBg;
-	}
-
-	const style::color &historyScrollBarColor() {
-		return _historyScrollBarColor;
-	}
-
-	const style::color &historyScrollBgColor() {
-		return _historyScrollBgColor;
-	}
-
-	const style::color &historyScrollBarOverColor() {
-		return _historyScrollBarOverColor;
-	}
-
-	const style::color &historyScrollBgOverColor() {
-		return _historyScrollBgOverColor;
-	}
-
-	const style::color &introPointHoverColor() {
-		return _introPointHoverColor;
+		roundRect(p, x, y, w, h, bg, i.value(), nullptr, parts);
 	}
 
 	WallPapers gServerBackgrounds;

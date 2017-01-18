@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "layout.h"
@@ -27,7 +27,6 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "fileuploader.h"
 #include "mainwindow.h"
 #include "ui/filedialog.h"
-#include "playerwidget.h"
 #include "boxes/addcontactbox.h"
 #include "boxes/confirmbox.h"
 #include "media/media_audio.h"
@@ -77,11 +76,19 @@ const TextParseOptions &itemTextOptions(History *h, PeerData *f) {
 	return _historyTextOptions;
 }
 
+const TextParseOptions &itemTextOptions(const HistoryItem *item) {
+	return itemTextOptions(item->history(), item->author());
+}
+
 const TextParseOptions &itemTextNoMonoOptions(History *h, PeerData *f) {
 	if ((h->peer->isUser() && h->peer->asUser()->botInfo) || (f->isUser() && f->asUser()->botInfo) || (h->peer->isChat() && h->peer->asChat()->botStatus >= 0) || (h->peer->isMegagroup() && h->peer->asChannel()->mgInfo->botStatus >= 0)) {
 		return _historyBotNoMonoOptions;
 	}
 	return _historyTextNoMonoOptions;
+}
+
+const TextParseOptions &itemTextNoMonoOptions(const HistoryItem *item) {
+	return itemTextNoMonoOptions(item->history(), item->author());
 }
 
 QString formatSizeText(qint64 size) {
@@ -144,6 +151,22 @@ QString documentName(DocumentData *document) {
 	return song->performer + QString::fromUtf8(" \xe2\x80\x93 ") + (song->title.isEmpty() ? qsl("Unknown Track") : song->title);
 }
 
+TextWithEntities documentNameWithEntities(DocumentData *document) {
+	TextWithEntities result;
+	auto song = document->song();
+	if (!song || (song->title.isEmpty() && song->performer.isEmpty())) {
+		result.text = document->name.isEmpty() ? qsl("Unknown File") : document->name;
+		result.entities.push_back({ EntityInTextBold, 0, result.text.size() });
+	} else if (song->performer.isEmpty()) {
+		result.text = song->title;
+		result.entities.push_back({ EntityInTextBold, 0, result.text.size() });
+	} else {
+		result.text = song->performer + QString::fromUtf8(" \xe2\x80\x93 ") + (song->title.isEmpty() ? qsl("Unknown Track") : song->title);
+		result.entities.push_back({ EntityInTextBold, 0, song->performer.size() });
+	}
+	return result;
+}
+
 int32 documentColorIndex(DocumentData *document, QString &ext) {
 	int32 colorIndex = 0;
 
@@ -188,32 +211,47 @@ int32 documentColorIndex(DocumentData *document, QString &ext) {
 }
 
 style::color documentColor(int32 colorIndex) {
-	static style::color colors[] = { st::msgFileBlueColor, st::msgFileGreenColor, st::msgFileRedColor, st::msgFileYellowColor };
+	const style::color colors[] = {
+		st::msgFile1Bg,
+		st::msgFile2Bg,
+		st::msgFile3Bg,
+		st::msgFile4Bg
+	};
 	return colors[colorIndex & 3];
 }
 
 style::color documentDarkColor(int32 colorIndex) {
-	static style::color colors[] = { st::msgFileBlueDark, st::msgFileGreenDark, st::msgFileRedDark, st::msgFileYellowDark };
+	static style::color colors[] = {
+		st::msgFile1BgDark,
+		st::msgFile2BgDark,
+		st::msgFile3BgDark,
+		st::msgFile4BgDark
+	};
 	return colors[colorIndex & 3];
 }
 
 style::color documentOverColor(int32 colorIndex) {
-	static style::color colors[] = { st::msgFileBlueOver, st::msgFileGreenOver, st::msgFileRedOver, st::msgFileYellowOver };
+	static style::color colors[] = {
+		st::msgFile1BgOver,
+		st::msgFile2BgOver,
+		st::msgFile3BgOver,
+		st::msgFile4BgOver
+	};
 	return colors[colorIndex & 3];
 }
 
 style::color documentSelectedColor(int32 colorIndex) {
-	static style::color colors[] = { st::msgFileBlueSelected, st::msgFileGreenSelected, st::msgFileRedSelected, st::msgFileYellowSelected };
+	static style::color colors[] = {
+		st::msgFile1BgSelected,
+		st::msgFile2BgSelected,
+		st::msgFile3BgSelected,
+		st::msgFile4BgSelected
+	};
 	return colors[colorIndex & 3];
 }
 
-style::sprite documentCorner(int32 colorIndex) {
-	static style::sprite corners[] = { st::msgFileBlue, st::msgFileGreen, st::msgFileRed, st::msgFileYellow };
-	return corners[colorIndex & 3];
-}
-
 RoundCorners documentCorners(int32 colorIndex) {
-	return RoundCorners(DocBlueCorners + (colorIndex & 3));
+	return RoundCorners(Doc1Corners + (colorIndex & 3));
 }
 
 bool documentIsValidMediaFile(const QString &filepath) {

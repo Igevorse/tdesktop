@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "ui/filedialog.h"
@@ -255,7 +255,7 @@ QString filedialogAllFilesFilter() {
 namespace FileDialog {
 namespace {
 
-using internal::QueryUpdateHandler;
+base::Observable<QueryUpdate> QueryDoneObservable;
 
 struct Query {
 	enum class Type {
@@ -282,19 +282,13 @@ using QueryList = QList<Query>;
 NeverFreedPointer<QueryList> Queries;
 
 void StartCallback() {
-	Queries.makeIfNull();
+	Queries.createIfNull();
 }
-
-void FinishCallback() {
-	Queries.clear();
-}
-
-Notify::SimpleObservedEventRegistrator<QueryUpdateHandler> creator(StartCallback, FinishCallback);
 
 } // namespace
 
 QueryId queryReadFile(const QString &caption, const QString &filter) {
-	t_assert(creator.started());
+	Queries.createIfNull();
 
 	Queries->push_back(Query(Query::Type::ReadFile, caption, filter));
 	Global::RefHandleFileDialogQueue().call();
@@ -302,7 +296,7 @@ QueryId queryReadFile(const QString &caption, const QString &filter) {
 }
 
 QueryId queryReadFiles(const QString &caption, const QString &filter) {
-	t_assert(creator.started());
+	Queries.createIfNull();
 
 	Queries->push_back(Query(Query::Type::ReadFiles, caption, filter));
 	Global::RefHandleFileDialogQueue().call();
@@ -310,7 +304,7 @@ QueryId queryReadFiles(const QString &caption, const QString &filter) {
 }
 
 QueryId queryWriteFile(const QString &caption, const QString &filter, const QString &filePath) {
-	t_assert(creator.started());
+	Queries.createIfNull();
 
 	Queries->push_back(Query(Query::Type::WriteFile, caption, filter, filePath));
 	Global::RefHandleFileDialogQueue().call();
@@ -318,7 +312,7 @@ QueryId queryWriteFile(const QString &caption, const QString &filter, const QStr
 }
 
 QueryId queryReadFolder(const QString &caption) {
-	t_assert(creator.started());
+	Queries.createIfNull();
 
 	Queries->push_back(Query(Query::Type::ReadFolder, caption));
 	Global::RefHandleFileDialogQueue().call();
@@ -326,7 +320,7 @@ QueryId queryReadFolder(const QString &caption) {
 }
 
 bool processQuery() {
-	if (!creator.started() || !Global::started() || Queries->isEmpty()) return false;
+	if (!Queries || !Global::started() || Queries->isEmpty()) return false;
 
 	auto query = Queries->front();
 	Queries->pop_front();
@@ -373,18 +367,15 @@ bool processQuery() {
 	} break;
 	}
 
-	// No one know what happened during filedialogGet*() call in the event loop.
-	if (!creator.started() || !Global::started()) return false;
+	// No one knows what happened during filedialogGet*() call in the event loop.
+	if (!Queries || !Global::started()) return false;
 
-	creator.notify(update);
+	QueryDone().notify(std_::move(update));
 	return true;
 }
 
-namespace internal {
-
-Notify::ConnectionId plainRegisterObserver(QueryUpdateHandler &&handler) {
-	return creator.registerObserver(std_::forward<QueryUpdateHandler>(handler));
+base::Observable<QueryUpdate> &QueryDone() {
+	return QueryDoneObservable;
 }
 
-} // namespace internal
 } // namespace FileDialog

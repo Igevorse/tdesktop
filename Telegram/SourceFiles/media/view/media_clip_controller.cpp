@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "media/view/media_clip_controller.h"
@@ -24,9 +24,10 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 #include "media/view/media_clip_playback.h"
 #include "media/view/media_clip_volume_controller.h"
 #include "styles/style_mediaview.h"
-#include "ui/widgets/label_simple.h"
-#include "ui/effects/fade_animation.h"
-#include "ui/buttons/icon_button.h"
+#include "ui/widgets/labels.h"
+#include "ui/widgets/continuous_sliders.h"
+#include "ui/effects/widget_fade_wrap.h"
+#include "ui/widgets/buttons.h"
 #include "media/media_audio.h"
 
 namespace Media {
@@ -34,29 +35,34 @@ namespace Clip {
 
 Controller::Controller(QWidget *parent) : TWidget(parent)
 , _playPauseResume(this, st::mediaviewPlayButton)
-, _playback(this)
+, _playback(std_::make_unique<Playback>(new Ui::MediaSlider(this, st::mediaviewPlayback)))
 , _volumeController(this)
 , _fullScreenToggle(this, st::mediaviewFullScreenButton)
 , _playedAlready(this, st::mediaviewPlayProgressLabel)
 , _toPlayLeft(this, st::mediaviewPlayProgressLabel)
 , _fadeAnimation(std_::make_unique<Ui::FadeAnimation>(this)) {
 	_fadeAnimation->show();
-	_fadeAnimation->setFinishedCallback(func(this, &Controller::fadeFinished));
-	_fadeAnimation->setUpdatedCallback(func(this, &Controller::fadeUpdated));
+	_fadeAnimation->setFinishedCallback([this] { fadeFinished(); });
+	_fadeAnimation->setUpdatedCallback([this](float64 opacity) { fadeUpdated(opacity); });
 
 	_volumeController->setVolume(Global::VideoVolume());
 
 	connect(_playPauseResume, SIGNAL(clicked()), this, SIGNAL(playPressed()));
 	connect(_fullScreenToggle, SIGNAL(clicked()), this, SIGNAL(toFullScreenPressed()));
-	connect(_playback, SIGNAL(seekProgress(float64)), this, SLOT(onSeekProgress(float64)));
-	connect(_playback, SIGNAL(seekFinished(float64)), this, SLOT(onSeekFinished(float64)));
 	connect(_volumeController, SIGNAL(volumeChanged(float64)), this, SIGNAL(volumeChanged(float64)));
+
+	_playback->setChangeProgressCallback([this](float64 value) {
+		handleSeekProgress(value);
+	});
+	_playback->setChangeFinishedCallback([this](float64 value) {
+		handleSeekFinished(value);
+	});
 }
 
-void Controller::onSeekProgress(float64 progress) {
+void Controller::handleSeekProgress(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<int64>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	if (_seekPositionMs != positionMs) {
 		_seekPositionMs = positionMs;
 		refreshTimeTexts();
@@ -64,10 +70,10 @@ void Controller::onSeekProgress(float64 progress) {
 	}
 }
 
-void Controller::onSeekFinished(float64 progress) {
+void Controller::handleSeekFinished(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	auto positionMs = snap(static_cast<int64>(progress * _lastDurationMs), 0LL, _lastDurationMs);
+	auto positionMs = snap(static_cast<TimeMs>(progress * _lastDurationMs), 0LL, _lastDurationMs);
 	_seekPositionMs = -1;
 	emit seekFinished(positionMs);
 	refreshTimeTexts();
@@ -75,13 +81,13 @@ void Controller::onSeekFinished(float64 progress) {
 
 void Controller::showAnimated() {
 	startFading([this]() {
-		_fadeAnimation->fadeIn(st::mvShowDuration);
+		_fadeAnimation->fadeIn(st::mediaviewShowDuration);
 	});
 }
 
 void Controller::hideAnimated() {
 	startFading([this]() {
-		_fadeAnimation->fadeOut(st::mvHideDuration);
+		_fadeAnimation->fadeOut(st::mediaviewHideDuration);
 	});
 }
 
@@ -99,9 +105,9 @@ void Controller::fadeUpdated(float64 opacity) {
 	_playback->setFadeOpacity(opacity);
 }
 
-void Controller::updatePlayback(const AudioPlaybackState &playbackState, bool reset) {
+void Controller::updatePlayback(const AudioPlaybackState &playbackState) {
 	updatePlayPauseResumeState(playbackState);
-	_playback->updateState(playbackState, reset);
+	_playback->updateState(playbackState);
 	updateTimeTexts(playbackState);
 }
 
@@ -112,7 +118,7 @@ void Controller::updatePlayPauseResumeState(const AudioPlaybackState &playbackSt
 		_showPause = showPause;
 		connect(_playPauseResume, SIGNAL(clicked()), this, _showPause ? SIGNAL(pausePressed()) : SIGNAL(playPressed()));
 
-		_playPauseResume->setIcon(_showPause ? &st::mediaviewPauseIcon : nullptr);
+		_playPauseResume->setIconOverride(_showPause ? &st::mediaviewPauseIcon : nullptr, _showPause ? &st::mediaviewPauseIconOver : nullptr);
 	}
 }
 
@@ -163,7 +169,7 @@ void Controller::refreshTimeTexts() {
 }
 
 void Controller::setInFullScreen(bool inFullScreen) {
-	_fullScreenToggle->setIcon(inFullScreen ? &st::mediaviewFullScreenOutIcon : nullptr);
+	_fullScreenToggle->setIconOverride(inFullScreen ? &st::mediaviewFullScreenOutIcon : nullptr, inFullScreen ? &st::mediaviewFullScreenOutIconOver : nullptr);
 	disconnect(_fullScreenToggle, SIGNAL(clicked()), this, SIGNAL(toFullScreenPressed()));
 	disconnect(_fullScreenToggle, SIGNAL(clicked()), this, SIGNAL(fromFullScreenPressed()));
 
@@ -189,11 +195,13 @@ void Controller::resizeEvent(QResizeEvent *e) {
 	_fullScreenToggle->moveToRight(st::mediaviewFullScreenLeft, fullScreenTop);
 
 	_volumeController->moveToRight(st::mediaviewFullScreenLeft + _fullScreenToggle->width() + st::mediaviewVolumeLeft, (height() - _volumeController->height()) / 2);
-	_playback->resize(width() - st::mediaviewPlayPauseLeft - _playPauseResume->width() - playTop - fullScreenTop - _volumeController->width() - st::mediaviewVolumeLeft - _fullScreenToggle->width() - st::mediaviewFullScreenLeft, st::mediaviewSeekSize.height());
+
+	int playbackWidth = width() - st::mediaviewPlayPauseLeft - _playPauseResume->width() - playTop - fullScreenTop - _volumeController->width() - st::mediaviewVolumeLeft - _fullScreenToggle->width() - st::mediaviewFullScreenLeft;
+	_playback->resize(playbackWidth, st::mediaviewPlayback.seekSize.height());
 	_playback->moveToLeft(st::mediaviewPlayPauseLeft + _playPauseResume->width() + playTop, st::mediaviewPlaybackTop);
 
 	_playedAlready->moveToLeft(st::mediaviewPlayPauseLeft + _playPauseResume->width() + playTop, st::mediaviewPlayProgressTop);
-	_toPlayLeft->moveToRight(width() - (st::mediaviewPlayPauseLeft + _playPauseResume->width() + playTop) - _playback->width(), st::mediaviewPlayProgressTop);
+	_toPlayLeft->moveToRight(width() - (st::mediaviewPlayPauseLeft + _playPauseResume->width() + playTop) - playbackWidth, st::mediaviewPlayProgressTop);
 }
 
 void Controller::paintEvent(QPaintEvent *e) {
@@ -203,15 +211,14 @@ void Controller::paintEvent(QPaintEvent *e) {
 		return;
 	}
 
-	App::roundRect(p, rect(), st::medviewSaveMsg, MediaviewSaveCorners);
+	App::roundRect(p, rect(), st::mediaviewSaveMsgBg, MediaviewSaveCorners);
 }
 
 void Controller::mousePressEvent(QMouseEvent *e) {
 	e->accept(); // Don't pass event to the MediaView.
 }
 
-Controller::~Controller() {
-}
+Controller::~Controller() = default;
 
 } // namespace Clip
 } // namespace Media

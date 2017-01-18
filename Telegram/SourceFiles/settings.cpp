@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "settings.h"
@@ -47,11 +47,6 @@ QString gLangErrors;
 
 QString gDialogLastPath, gDialogHelperPath; // optimize QFileDialog
 
-bool gSoundNotify = true;
-bool gIncludeMuted = true;
-bool gDesktopNotify = true;
-DBINotifyView gNotifyView = dbinvShowPreview;
-bool gWindowsNotifications = true;
 bool gStartMinimized = false;
 bool gStartInTray = false;
 bool gAutoStart = false;
@@ -61,30 +56,14 @@ TWindowPos gWindowPos;
 LaunchMode gLaunchMode = LaunchModeNormal;
 bool gSupportTray = true;
 DBIWorkMode gWorkMode = dbiwmWindowAndTray;
-DBIConnectionType gConnectionType = dbictAuto;
-ConnectionProxy gConnectionProxy;
-#ifdef Q_OS_WIN
-bool gTryIPv6 = false;
-#else
-bool gTryIPv6 = true;
-#endif
 bool gSeenTrayTooltip = false;
 bool gRestartingUpdate = false, gRestarting = false, gRestartingToSettings = false, gWriteProtected = false;
 int32 gLastUpdateCheck = 0;
 bool gNoStartUpdate = false;
 bool gStartToSettings = false;
-DBIDefaultAttach gDefaultAttach = dbidaDocument;
 bool gReplaceEmojis = true;
-bool gAskDownloadPath = false;
-QString gDownloadPath;
-QByteArray gDownloadPathBookmark;
 
 bool gCtrlEnter = false;
-
-QPixmapPointer gChatBackground = 0;
-int32 gChatBackgroundId = 0;
-QPixmapPointer gChatDogImage = 0;
-bool gTileBackground = false;
 
 uint32 gConnectionsInSession = 1;
 QString gLoggedPhoneNumber;
@@ -94,9 +73,6 @@ DBIScale gRealScale = dbisAuto, gScreenScale = dbisOne, gConfigScale = dbisAuto;
 bool gCompressPastedImage = true;
 
 QString gTimeFormat = qsl("hh:mm");
-
-int32 gAutoLock = 3600;
-bool gHasPasscode = false;
 
 bool gHasAudioPlayer = true;
 bool gHasAudioCapture = true;
@@ -109,7 +85,7 @@ RecentStickerPreload gRecentStickersPreload;
 RecentStickerPack gRecentStickers;
 
 SavedGifs gSavedGifs;
-uint64 gLastSavedGifsUpdate = 0;
+TimeMs gLastSavedGifsUpdate = 0;
 bool gShowingSavedGifs = false;
 
 RecentHashtagPack gRecentWriteHashtags, gRecentSearchHashtags;
@@ -118,7 +94,7 @@ RecentInlineBots gRecentInlineBots;
 
 bool gPasswordRecovered = false;
 int32 gPasscodeBadTries = 0;
-uint64 gPasscodeLastTry = 0;
+TimeMs gPasscodeLastTry = 0;
 
 int32 gLang = -2; // auto
 QString gLangFile;
@@ -126,7 +102,6 @@ QString gLangFile;
 bool gRetina = false;
 float64 gRetinaFactor = 1.;
 int32 gIntRetinaFactor = 1;
-bool gCustomNotifies = true;
 
 #ifdef Q_OS_WIN
 DBIPlatform gPlatform = dbipWindows;
@@ -160,12 +135,14 @@ bool gAutoPlayGif = true;
 
 void settingsParseArgs(int argc, char *argv[]) {
 #ifdef Q_OS_MAC
+#ifndef OS_MAC_OLD
 	if (QSysInfo::macVersion() >= QSysInfo::MV_10_11) {
 		gIsElCapitan = true;
-	} else if (QSysInfo::macVersion() < QSysInfo::MV_10_8) {
-		gPlatform = dbipMacOld;
 	}
-#endif
+#else // OS_MAC_OLD
+	gPlatform = dbipMacOld;
+#endif // OS_MAC_OLD
+#endif // Q_OS_MAC
 
 	switch (cPlatform()) {
 	case dbipWindows:
@@ -174,8 +151,11 @@ void settingsParseArgs(int argc, char *argv[]) {
 	break;
 	case dbipMac:
 		gUpdateURL = QUrl(qsl("http://tdesktop.com/mac/tupdates/current"));
+#ifndef OS_MAC_STORE
 		gPlatformString = qsl("MacOS");
-		gCustomNotifies = false;
+#else // OS_MAC_STORE
+		gPlatformString = qsl("MacAppStore");
+#endif // OS_MAC_STORE
 	break;
 	case dbipMacOld:
 		gUpdateURL = QUrl(qsl("http://tdesktop.com/mac32/tupdates/current"));
@@ -204,39 +184,39 @@ void settingsParseArgs(int argc, char *argv[]) {
 		gStartUrl = fromUtf8Safe(argv[1]);
 	}
     for (int32 i = 0; i < argc; ++i) {
-		if (string("-testmode") == argv[i]) {
+		if (qstr("-testmode") == argv[i]) {
 			gTestMode = true;
-		} else if (string("-debug") == argv[i]) {
+		} else if (qstr("-debug") == argv[i]) {
 			gDebug = true;
-		} else if (string("-many") == argv[i]) {
+		} else if (qstr("-many") == argv[i]) {
 			gManyInstance = true;
-		} else if (string("-key") == argv[i] && i + 1 < argc) {
+		} else if (qstr("-key") == argv[i] && i + 1 < argc) {
 			gKeyFile = fromUtf8Safe(argv[++i]);
-		} else if (string("-autostart") == argv[i]) {
+		} else if (qstr("-autostart") == argv[i]) {
 			gLaunchMode = LaunchModeAutoStart;
-		} else if (string("-fixprevious") == argv[i]) {
+		} else if (qstr("-fixprevious") == argv[i]) {
 			gLaunchMode = LaunchModeFixPrevious;
-		} else if (string("-cleanup") == argv[i]) {
+		} else if (qstr("-cleanup") == argv[i]) {
 			gLaunchMode = LaunchModeCleanup;
-		} else if (string("-crash") == argv[i] && i + 1 < argc) {
+		} else if (qstr("-crash") == argv[i] && i + 1 < argc) {
 			gLaunchMode = LaunchModeShowCrash;
 			gStartUrl = fromUtf8Safe(argv[++i]);
-		} else if (string("-noupdate") == argv[i]) {
+		} else if (qstr("-noupdate") == argv[i]) {
 			gNoStartUpdate = true;
-		} else if (string("-tosettings") == argv[i]) {
+		} else if (qstr("-tosettings") == argv[i]) {
 			gStartToSettings = true;
-		} else if (string("-startintray") == argv[i]) {
+		} else if (qstr("-startintray") == argv[i]) {
 			gStartInTray = true;
-		} else if (string("-sendpath") == argv[i] && i + 1 < argc) {
+		} else if (qstr("-sendpath") == argv[i] && i + 1 < argc) {
 			for (++i; i < argc; ++i) {
 				gSendPaths.push_back(fromUtf8Safe(argv[i]));
 			}
-		} else if (string("-workdir") == argv[i] && i + 1 < argc) {
+		} else if (qstr("-workdir") == argv[i] && i + 1 < argc) {
 			QString dir = fromUtf8Safe(argv[++i]);
 			if (QDir().exists(dir)) {
 				gWorkingDir = dir;
 			}
-		} else if (string("--") == argv[i] && i + 1 < argc) {
+		} else if (qstr("--") == argv[i] && i + 1 < argc) {
 			gStartUrl = fromUtf8Safe(argv[++i]).mid(0, 8192);
 		}
 	}

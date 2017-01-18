@@ -16,9 +16,11 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
+
+#include "core/stl_subset.h"
 
 // some minimal implementation of std::vector() for moveable (but not copiable) types.
 namespace std_ {
@@ -30,6 +32,21 @@ class vector_of_moveable {
 	void *_plaindata = nullptr;
 
 public:
+	vector_of_moveable() = default;
+	vector_of_moveable(const vector_of_moveable &other) = delete;
+	vector_of_moveable &operator=(const vector_of_moveable &other) = delete;
+	vector_of_moveable(vector_of_moveable &&other)
+		: _size(base::take(other._size))
+		, _capacity(base::take(other._capacity))
+		, _plaindata(base::take(other._plaindata)) {
+	}
+	vector_of_moveable &operator=(vector_of_moveable &&other) {
+		std_::swap_moveable(_size, other._size);
+		std_::swap_moveable(_capacity, other._capacity);
+		std_::swap_moveable(_plaindata, other._plaindata);
+		return *this;
+	}
+
 	inline T *data() {
 		return reinterpret_cast<T*>(_plaindata);
 	}
@@ -78,6 +95,7 @@ public:
 			*prev = std_::move(*next);
 		}
 		--_size;
+		end()->~T();
 		return it;
 	}
 
@@ -101,7 +119,7 @@ public:
 		return insertAt;
 	}
 	inline void push_back(T &&value) {
-		insert(end(), std_::forward<T>(value));
+		insert(end(), std_::move(value));
 	}
 	inline void pop_back() {
 		erase(end() - 1);
@@ -128,9 +146,19 @@ public:
 	}
 	inline const T &at(int index) const {
 		if (index < 0 || index >= _size) {
+#ifndef OS_MAC_OLD
 			throw std::out_of_range("");
+#else // OS_MAC_OLD
+			throw std::exception();
+#endif // OS_MAC_OLD
 		}
 		return data()[index];
+	}
+
+	void reserve(int newCapacity) {
+		if (newCapacity > _capacity) {
+			reallocate(newCapacity);
+		}
 	}
 
 	inline ~vector_of_moveable() {
@@ -146,7 +174,7 @@ private:
 			new (newLocation) T(std_::move(*oldLocation));
 			oldLocation->~T();
 		}
-		std::swap(_plaindata, newPlainData);
+		std_::swap_moveable(_plaindata, newPlainData);
 		_capacity = newCapacity;
 		operator delete[](newPlainData);
 	}

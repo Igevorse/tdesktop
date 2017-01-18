@@ -1,5 +1,7 @@
 ##Build instructions for Qt Creator 3.5.1 under Ubuntu 12.04
 
+**NB** These are outdated, please refer to [Building using GYP/CMake][cmake] instructions.
+
 ###Prepare
 
 * Install git by command **sudo apt-get install git** in Terminal
@@ -23,8 +25,6 @@ Choose a folder for the future build, for example **/home/user/TBuild** There yo
 By git – in Terminal go to **/home/user/TBuild** and run
 
     git clone https://github.com/telegramdesktop/tdesktop.git
-
-or download in ZIP and extract to **/home/user/TBuild** rename **tdesktop-master** to **tdesktop** to have **/home/user/TBuild/tdesktop/Telegram/Telegram.pro** project
 
 ###Prepare libraries
 
@@ -69,7 +69,7 @@ In Terminal go to **/home/user/TBuild/Libraries** and run
 
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
-    git checkout release/3.1
+    git checkout release/3.2
 
     sudo apt-get update
     sudo apt-get -y --force-yes install autoconf automake build-essential libass-dev libfreetype6-dev libgpac-dev libsdl1.2-dev libtheora-dev libtool libva-dev libvdpau-dev libvorbis-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev pkg-config texi2html zlib1g-dev
@@ -123,31 +123,31 @@ In Terminal go to **/home/user/TBuild/Libraries** and run
     make
     sudo make install
 
-####Qt 5.6.0, slightly patched
+####Qt 5.6.2, slightly patched
 
 In Terminal go to **/home/user/TBuild/Libraries** and run
 
-    git clone git://code.qt.io/qt/qt5.git qt5_6_0
-    cd qt5_6_0
+    git clone git://code.qt.io/qt/qt5.git qt5_6_2
+    cd qt5_6_2
     git checkout 5.6
     perl init-repository --module-subset=qtbase,qtimageformats
-    git checkout v5.6.0
-    cd qtimageformats && git checkout v5.6.0 && cd ..
-    cd qtbase && git checkout v5.6.0 && cd ..
+    git checkout v5.6.2
+    cd qtimageformats && git checkout v5.6.2 && cd ..
+    cd qtbase && git checkout v5.6.2 && cd ..
 
 #####Apply the patch
 
-    cd qtbase && git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_0.diff && cd ..
+    cd qtbase && git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_2.diff && cd ..
 
 #####Building library
 
-Install some packages for Qt (see **/home/user/TBuild/Libraries/qt5_6_0/qtbase/src/plugins/platforms/xcb/README**)
+Install some packages for Qt (see **/home/user/TBuild/Libraries/qt5_6_2/qtbase/src/plugins/platforms/xcb/README**)
 
     sudo apt-get install libxcb1-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-icccm4-dev libxcb-render-util0-dev libxcb-util0-dev libxrender-dev libasound-dev libpulse-dev libxcb-sync0-dev libxcb-xfixes0-dev libxcb-randr0-dev libx11-xcb-dev libffi-dev
 
-In Terminal go to **/home/user/TBuild/Libraries/qt5_6_0** and there run
+In Terminal go to **/home/user/TBuild/Libraries/qt5_6_2** and there run
 
-    OPENSSL_LIBS='-L/usr/local/ssl/lib -lssl -lcrypto' ./configure -prefix "/usr/local/tdesktop/Qt-5.6.0" -release -force-debug-info -opensource -confirm-license -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb -qt-xkbcommon-x11 -no-opengl -no-gtkstyle -static -openssl-linked -nomake examples -nomake tests
+    ./configure -prefix "/usr/local/tdesktop/Qt-5.6.2" -release -force-debug-info -opensource -confirm-license -qt-zlib -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb -qt-xkbcommon-x11 -no-opengl -no-gtkstyle -static -openssl-linked -nomake examples -nomake tests
     make -j4
     sudo make install
 
@@ -170,19 +170,21 @@ In Terminal go to **/home/user/TBuild/tdesktop** and run
 
     mkdir -p Linux/obj/codegen_style/Debug
     cd Linux/obj/codegen_style/Debug
-    /usr/local/tdesktop/Qt-5.6.0/bin/qmake CONFIG+=debug ../../../../Telegram/build/qmake/codegen_style/codegen_style.pro
+    /usr/local/tdesktop/Qt-5.6.2/bin/qmake CONFIG+=debug ../../../../Telegram/build/qmake/codegen_style/codegen_style.pro
     make
     mkdir -p ../../codegen_numbers/Debug
     cd ../../codegen_numbers/Debug
-    /usr/local/tdesktop/Qt-5.6.0/bin/qmake CONFIG+=debug ../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro
+    /usr/local/tdesktop/Qt-5.6.2/bin/qmake CONFIG+=debug ../../../../Telegram/build/qmake/codegen_numbers/codegen_numbers.pro
     make
 
 ###Building Telegram Desktop
 
 * Launch Qt Creator, all projects will be taken from **/home/user/TBuild/tdesktop/Telegram**
-* Tools > Options > Build & Run > Qt Versions tab > Add > File System /usr/local/tdesktop/Qt-5.6.0/bin/qmake > **Qt 5.6.0 (Qt-5.6.0)** > Apply
-* Tools > Options > Build & Run > Kits tab > Desktop (default) > change **Qt version** to **Qt 5.6.0 (Qt-5.6.0)** > Apply
+* Tools > Options > Build & Run > Qt Versions tab > Add > File System /usr/local/tdesktop/Qt-5.6.2/bin/qmake > **Qt 5.6.2 (Qt-5.6.2)** > Apply
+* Tools > Options > Build & Run > Kits tab > Desktop (default) > change **Qt version** to **Qt 5.6.2 (Qt-5.6.2)** > Apply
 * Open MetaLang.pro, configure project with paths **/home/user/TBuild/tdesktop/Linux/DebugIntermediateLang** and **/home/user/TBuild/tdesktop/Linux/ReleaseIntermediateLang** and build for Debug
 * Open Telegram.pro, configure project with paths **/home/user/TBuild/tdesktop/Linux/DebugIntermediate** and **/home/user/TBuild/tdesktop/Linux/ReleaseIntermediate** and build for Debug, if GeneratedFiles are not found click **Run qmake** from **Build** menu and try again
 * Open Updater.pro, configure project with paths **/home/user/TBuild/tdesktop/Linux/DebugIntermediateUpdater** and **/home/user/TBuild/tdesktop/Linux/ReleaseIntermediateUpdater** and build for Debug
 * Release Telegram build will require removing **CUSTOM_API_ID** definition in Telegram.pro project and may require changing paths in **/home/user/TBuild/tdesktop/Telegram/FixMake.sh** or **/home/user/TBuild/tdesktop/Telegram/FixMake32.sh** for static library linking fix, static linking applies only on second Release build (first uses old Makefile)
+
+[cmake]: building-cmake.md

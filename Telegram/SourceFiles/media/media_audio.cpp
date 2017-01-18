@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "media/media_audio.h"
@@ -30,6 +30,8 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 #define AL_ALEXT_PROTOTYPES
 #include <AL/alext.h>
+
+#include <numeric>
 
 extern "C" {
 #ifdef Q_OS_MAC
@@ -58,7 +60,7 @@ namespace {
 	ALuint notifySource = 0;
 	ALuint notifyBuffer = 0;
 
-	uint64 notifyLengthMs = 0;
+	TimeMs notifyLengthMs = 0;
 
 	QMutex playerMutex;
 	AudioPlayer *player = 0;
@@ -133,7 +135,7 @@ void audioInit() {
 	alGenBuffers(1, &notifyBuffer);
 	if (!_checkALError()) return audioFinish();
 
-	QFile notify(st::newMsgSound);
+	QFile notify(":/gui/art/newmsg.wav");
 	if (!notify.open(QIODevice::ReadOnly)) return audioFinish();
 
 	QByteArray blob = notify.readAll();
@@ -284,21 +286,21 @@ void AudioPlayer::AudioMsg::clear() {
 	videoPlayId = 0;
 }
 
-AudioPlayer::AudioPlayer() : _audioCurrent(0), _songCurrent(0),
-_fader(new AudioPlayerFader(&_faderThread)),
-_loader(new AudioPlayerLoaders(&_loaderThread)) {
+AudioPlayer::AudioPlayer()
+: _fader(new AudioPlayerFader(&_faderThread))
+, _loader(new AudioPlayerLoaders(&_loaderThread)) {
 	connect(this, SIGNAL(faderOnTimer()), _fader, SLOT(onTimer()));
 	connect(this, SIGNAL(suppressSong()), _fader, SLOT(onSuppressSong()));
 	connect(this, SIGNAL(unsuppressSong()), _fader, SLOT(onUnsuppressSong()));
 	connect(this, SIGNAL(suppressAll()), _fader, SLOT(onSuppressAll()));
-	connect(this, SIGNAL(songVolumeChanged()), _fader, SLOT(onSongVolumeChanged()));
-	connect(this, SIGNAL(videoVolumeChanged()), _fader, SLOT(onVideoVolumeChanged()));
+	subscribe(Global::RefSongVolumeChanged(), [this] {
+		QMetaObject::invokeMethod(_fader, "onSongVolumeChanged");
+	});
+	subscribe(Global::RefVideoVolumeChanged(), [this] {
+		QMetaObject::invokeMethod(_fader, "onVideoVolumeChanged");
+	});
 	connect(this, SIGNAL(loaderOnStart(const AudioMsgId&,qint64)), _loader, SLOT(onStart(const AudioMsgId&,qint64)));
 	connect(this, SIGNAL(loaderOnCancel(const AudioMsgId&)), _loader, SLOT(onCancel(const AudioMsgId&)));
-	connect(&_faderThread, SIGNAL(started()), _fader, SLOT(onInit()));
-	connect(&_loaderThread, SIGNAL(started()), _loader, SLOT(onInit()));
-	connect(&_faderThread, SIGNAL(finished()), _fader, SLOT(deleteLater()));
-	connect(&_loaderThread, SIGNAL(finished()), _loader, SLOT(deleteLater()));
 	connect(_loader, SIGNAL(needToCheck()), _fader, SLOT(onTimer()));
 	connect(_loader, SIGNAL(error(const AudioMsgId&)), this, SLOT(onError(const AudioMsgId&)));
 	connect(_fader, SIGNAL(needToPreload(const AudioMsgId&)), _loader, SLOT(onLoad(const AudioMsgId&)));
@@ -306,6 +308,8 @@ _loader(new AudioPlayerLoaders(&_loaderThread)) {
 	connect(_fader, SIGNAL(audioStopped(const AudioMsgId&)), this, SLOT(onStopped(const AudioMsgId&)));
 	connect(_fader, SIGNAL(error(const AudioMsgId&)), this, SLOT(onError(const AudioMsgId&)));
 	connect(this, SIGNAL(stoppedOnError(const AudioMsgId&)), this, SIGNAL(updated(const AudioMsgId&)), Qt::QueuedConnection);
+	connect(this, SIGNAL(updated(const AudioMsgId&)), this, SLOT(onUpdated(const AudioMsgId&)));
+
 	_loaderThread.start();
 	_faderThread.start();
 }
@@ -340,6 +344,13 @@ AudioPlayer::~AudioPlayer() {
 	_loaderThread.quit();
 	_faderThread.wait();
 	_loaderThread.wait();
+}
+
+void AudioPlayer::onUpdated(const AudioMsgId &audio) {
+	if (audio.type() == AudioMsgId::Type::Video) {
+		videoSoundProgress(audio);
+	}
+	notify(audio);
 }
 
 void AudioPlayer::onError(const AudioMsgId &audio) {
@@ -436,6 +447,7 @@ bool AudioPlayer::fadedStop(AudioMsgId::Type type, bool *fadedStart) {
 void AudioPlayer::play(const AudioMsgId &audio, int64 position) {
 	auto type = audio.type();
 	AudioMsgId stopped;
+	auto notLoadedYet = false;
 	{
 		QMutexLocker lock(&playerMutex);
 
@@ -469,16 +481,14 @@ void AudioPlayer::play(const AudioMsgId &audio, int64 position) {
 		current->file = audio.audio()->location(true);
 		current->data = audio.audio()->data();
 		if (current->file.isEmpty() && current->data.isEmpty()) {
+			notLoadedYet = true;
 			if (audio.type() == AudioMsgId::Type::Song) {
 				setStoppedState(current);
-				if (!audio.audio()->loading()) {
-					DocumentOpenClickHandler::doOpen(audio.audio());
-				}
 			} else {
 				setStoppedState(current, AudioPlayerStoppedAtError);
-				onError(audio);
 			}
 		} else {
+			current->playbackState.position = position;
 			current->playbackState.state = fadedStart ? AudioPlayerStarting : AudioPlayerPlaying;
 			current->loading = true;
 			emit loaderOnStart(audio, position);
@@ -487,7 +497,16 @@ void AudioPlayer::play(const AudioMsgId &audio, int64 position) {
 			}
 		}
 	}
-	if (stopped) emit updated(stopped);
+	if (notLoadedYet) {
+		if (audio.type() == AudioMsgId::Type::Song) {
+			DocumentOpenClickHandler::doOpen(audio.audio(), App::histItemById(audio.contextId()));
+		} else {
+			onError(audio);
+		}
+	}
+	if (stopped) {
+		emit updated(stopped);
+	}
 }
 
 void AudioPlayer::initFromVideo(uint64 videoPlayId, std_::unique_ptr<VideoSoundData> &&data, int64 position) {
@@ -650,12 +669,12 @@ void AudioPlayer::feedFromVideo(VideoSoundPart &&part) {
 	_loader->feedFromVideo(std_::move(part));
 }
 
-int64 AudioPlayer::getVideoCorrectedTime(uint64 playId, int64 frameMs, uint64 systemMs) {
-	int64 result = frameMs;
+TimeMs AudioPlayer::getVideoCorrectedTime(uint64 playId, TimeMs frameMs, TimeMs systemMs) {
+	auto result = frameMs;
 
 	QMutexLocker videoLock(&_lastVideoMutex);
 	if (_lastVideoPlayId == playId && _lastVideoPlaybackWhen > 0) {
-		result = static_cast<int64>(_lastVideoPlaybackCorrectedMs);
+		result = static_cast<TimeMs>(_lastVideoPlaybackCorrectedMs);
 		if (systemMs > _lastVideoPlaybackWhen) {
 			result += (systemMs - _lastVideoPlaybackWhen);
 		}
@@ -904,22 +923,14 @@ bool audioCheckError() {
 } // namespace internal
 
 AudioCapture::AudioCapture() : _capture(new AudioCaptureInner(&_captureThread)) {
-	connect(this, SIGNAL(captureOnStart()), _capture, SLOT(onStart()));
-	connect(this, SIGNAL(captureOnStop(bool)), _capture, SLOT(onStop(bool)));
-	connect(_capture, SIGNAL(done(QByteArray,VoiceWaveform,qint32)), this, SIGNAL(onDone(QByteArray,VoiceWaveform,qint32)));
-	connect(_capture, SIGNAL(update(quint16,qint32)), this, SIGNAL(onUpdate(quint16,qint32)));
-	connect(_capture, SIGNAL(error()), this, SIGNAL(onError()));
+	connect(this, SIGNAL(start()), _capture, SLOT(onStart()));
+	connect(this, SIGNAL(stop(bool)), _capture, SLOT(onStop(bool)));
+	connect(_capture, SIGNAL(done(QByteArray,VoiceWaveform,qint32)), this, SIGNAL(done(QByteArray,VoiceWaveform,qint32)));
+	connect(_capture, SIGNAL(updated(quint16,qint32)), this, SIGNAL(updated(quint16,qint32)));
+	connect(_capture, SIGNAL(error()), this, SIGNAL(error()));
 	connect(&_captureThread, SIGNAL(started()), _capture, SLOT(onInit()));
 	connect(&_captureThread, SIGNAL(finished()), _capture, SLOT(deleteLater()));
 	_captureThread.start();
-}
-
-void AudioCapture::start() {
-	emit captureOnStart();
-}
-
-void AudioCapture::stop(bool needResult) {
-	emit captureOnStop(needResult);
 }
 
 bool AudioCapture::check() {
@@ -946,13 +957,15 @@ AudioCapture *audioCapture() {
 	return capture;
 }
 
-AudioPlayerFader::AudioPlayerFader(QThread *thread) : _timer(this), _pauseFlag(false), _paused(true),
-_suppressAll(false), _suppressAllAnim(false), _suppressSong(false), _suppressSongAnim(false),
-_suppressAllGain(1., 1.), _suppressSongGain(1., 1.),
-_suppressAllStart(0), _suppressSongStart(0) {
+AudioPlayerFader::AudioPlayerFader(QThread *thread) : QObject()
+, _timer(this)
+, _suppressAllGain(1., 1.)
+, _suppressSongGain(1., 1.) {
 	moveToThread(thread);
 	_timer.moveToThread(thread);
 	_pauseTimer.moveToThread(thread);
+	connect(thread, SIGNAL(started()), this, SLOT(onInit()));
+	connect(thread, SIGNAL(finished()), this, SLOT(deleteLater()));
 
 	_timer.setSingleShot(true);
 	connect(&_timer, SIGNAL(timeout()), this, SLOT(onTimer()));
@@ -972,23 +985,23 @@ void AudioPlayerFader::onTimer() {
 
 	bool suppressAudioChanged = false, suppressSongChanged = false;
 	if (_suppressAll || _suppressSongAnim) {
-		uint64 ms = getms();
+		auto ms = getms();
 		float64 wasSong = suppressSongGain;
 		if (_suppressAll) {
 			float64 wasAudio = suppressAllGain;
 			if (ms >= _suppressAllStart + notifyLengthMs || ms < _suppressAllStart) {
 				_suppressAll = _suppressAllAnim = false;
-				_suppressAllGain = anim::fvalue(1., 1.);
+				_suppressAllGain = anim::value(1., 1.);
 			} else if (ms > _suppressAllStart + notifyLengthMs - AudioFadeDuration) {
 				if (_suppressAllGain.to() != 1.) _suppressAllGain.start(1.);
 				_suppressAllGain.update(1. - ((_suppressAllStart + notifyLengthMs - ms) / float64(AudioFadeDuration)), anim::linear);
-			} else if (ms >= _suppressAllStart + st::notifyFastAnim) {
+			} else if (ms >= _suppressAllStart + st::mediaPlayerSuppressDuration) {
 				if (_suppressAllAnim) {
 					_suppressAllGain.finish();
 					_suppressAllAnim = false;
 				}
 			} else if (ms > _suppressAllStart) {
-				_suppressAllGain.update((ms - _suppressAllStart) / st::notifyFastAnim, anim::linear);
+				_suppressAllGain.update((ms - _suppressAllStart) / st::mediaPlayerSuppressDuration, anim::linear);
 			}
 			suppressAllGain = _suppressAllGain.current();
 			suppressAudioChanged = (suppressAllGain != wasAudio);
@@ -1591,13 +1604,11 @@ void AudioCaptureInner::onStop(bool needResult) {
 			d->opened = false;
 		}
 		if (d->ioContext) {
-			av_free(d->ioContext->buffer);
-			av_free(d->ioContext);
-			d->ioContext = nullptr;
+			av_freep(&d->ioContext->buffer);
+			av_freep(&d->ioContext);
 			d->ioBuffer = nullptr;
 		} else if (d->ioBuffer) {
-			av_free(d->ioBuffer);
-			d->ioBuffer = nullptr;
+			av_freep(&d->ioBuffer);
 		}
 		if (d->fmtContext) {
 			avformat_free_context(d->fmtContext);
@@ -1662,7 +1673,7 @@ void AudioCaptureInner::onTimeout() {
 		}
 		qint32 samplesFull = d->fullSamples + _captured.size() / sizeof(short), samplesSinceUpdate = samplesFull - d->lastUpdate;
 		if (samplesSinceUpdate > AudioVoiceMsgUpdateView * AudioVoiceMsgFrequency / 1000) {
-			emit update(d->levelMax, samplesFull);
+			emit updated(d->levelMax, samplesFull);
 			d->lastUpdate = samplesFull;
 			d->levelMax = 0;
 		}
@@ -1698,7 +1709,9 @@ void AudioCaptureInner::processFrame(int32 offset, int32 framesize) {
 	int res = 0;
 	char err[AV_ERROR_MAX_STRING_SIZE] = { 0 };
 
-	short *srcSamplesDataChannel = (short*)(_captured.data() + offset), **srcSamplesData = &srcSamplesDataChannel;
+	auto srcSamplesDataChannel = (short*)(_captured.data() + offset);
+	auto srcSamplesData = &srcSamplesDataChannel;
+
 //	memcpy(d->srcSamplesData[0], _captured.constData() + offset, framesize);
 	int32 skipSamples = AudioVoiceMsgSkip * AudioVoiceMsgFrequency / 1000, fadeSamples = AudioVoiceMsgFade * AudioVoiceMsgFrequency / 1000;
 	if (d->fullSamples < skipSamples + fadeSamples) {
@@ -1731,9 +1744,8 @@ void AudioCaptureInner::processFrame(int32 offset, int32 framesize) {
 	d->dstSamples = av_rescale_rnd(swr_get_delay(d->swrContext, d->codecContext->sample_rate) + d->srcSamples, d->codecContext->sample_rate, d->codecContext->sample_rate, AV_ROUND_UP);
 	if (d->dstSamples > d->maxDstSamples) {
 		d->maxDstSamples = d->dstSamples;
-		av_free(d->dstSamplesData[0]);
-
-		if ((res = av_samples_alloc(d->dstSamplesData, 0, d->codecContext->channels, d->dstSamples, d->codecContext->sample_fmt, 0)) < 0) {
+		av_freep(&d->dstSamplesData[0]);
+		if ((res = av_samples_alloc(d->dstSamplesData, 0, d->codecContext->channels, d->dstSamples, d->codecContext->sample_fmt, 1)) < 0) {
 			LOG(("Audio Error: Unable to av_samples_alloc for capture, error %1, %2").arg(res).arg(av_make_error_string(err, sizeof(err), res)));
 			onStop(false);
 			emit error();

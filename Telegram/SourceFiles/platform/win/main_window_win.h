@@ -16,15 +16,16 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "window/main_window.h"
-
 #include <windows.h>
 
-class NotifyWindow;
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
 
 namespace Platform {
 
@@ -34,12 +35,6 @@ class MainWindow : public Window::MainWindow {
 public:
 	MainWindow();
 
-	int32 psResizeRowWidth() const {
-		return 0;//st::wndResizeAreaWidth;
-	}
-
-	void psInitFrameless();
-	void psInitSize();
 	HWND psHwnd() const;
 	HMENU psMenu() const;
 
@@ -47,9 +42,6 @@ public:
 	void psInitSysMenu();
 	void psUpdateSysMenu(Qt::WindowState state);
 	void psUpdateMargins();
-	void psUpdatedPosition();
-
-	bool psHandleTitle();
 
 	void psFlash();
 	void psNotifySettingGot();
@@ -58,21 +50,9 @@ public:
 
 	void psRefreshTaskbarIcon();
 
-	bool psPosInited() const {
-		return posInited;
-	}
-
-	void psActivateNotify(NotifyWindow *w);
-	void psClearNotifies(PeerId peerId = 0);
-	void psNotifyShown(NotifyWindow *w);
-	void psPlatformNotify(HistoryItem *item, int32 fwdCount);
-
-	void psUpdateCounter();
-
 	bool psHasNativeNotifications();
-	void psCleanNotifyPhotosIn(int32 dt);
 
-	virtual QImage iconWithCounter(int size, int count, style::color bg, bool smallIcon) = 0;
+	virtual QImage iconWithCounter(int size, int count, style::color bg, style::color fg, bool smallIcon) = 0;
 
 	static UINT TaskbarCreatedMsgId() {
 		return _taskbarCreatedMsgId;
@@ -106,31 +86,33 @@ public:
 	~MainWindow();
 
 public slots:
-
-	void psUpdateDelegate();
-	void psSavePosition(Qt::WindowState state = Qt::WindowActive);
 	void psShowTrayMenu();
 
-	void psCleanNotifyPhotos();
-
 protected:
+	void initHook() override;
+	int32 screenNameChecksum(const QString &name) const override;
+	void unreadCounterChangedHook() override;
 
-	bool psHasTrayIcon() const {
+	bool hasTrayIcon() const override {
 		return trayIcon;
 	}
 
-	bool posInited = false;
 	QSystemTrayIcon *trayIcon = nullptr;
-	PopupMenu *trayIconMenu = nullptr;
+	Ui::PopupMenu *trayIconMenu = nullptr;
 	QImage icon256, iconbig256;
 	QIcon wndIcon;
 
 	void psTrayMenuUpdated();
 	void psSetupTrayIcon();
+	virtual void placeSmallCounter(QImage &img, int size, int count, style::color bg, const QPoint &shift, style::color color) = 0;
+
+	void showTrayTooltip() override;
 
 	QTimer psUpdatedPositionTimer;
 
 private:
+	void updateIconCounters();
+
 	void psDestroyIcons();
 
 	static UINT _taskbarCreatedMsgId;
@@ -144,8 +126,6 @@ private:
 	HICON ps_iconBig = nullptr;
 	HICON ps_iconSmall = nullptr;
 	HICON ps_iconOverlay = nullptr;
-
-	SingleTimer ps_cleanNotifyPhotosTimer;
 
 	int _deltaLeft = 0;
 	int _deltaTop = 0;

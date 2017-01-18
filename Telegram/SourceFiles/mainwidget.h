@@ -16,22 +16,38 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "localimageloader.h"
 #include "history/history_common.h"
+#include "core/single_timer.h"
+
+namespace Notify {
+struct PeerUpdate;
+} // namespace Notify
 
 namespace Dialogs {
 class Row;
 } // namespace Dialogs
 
+namespace Media {
+namespace Player {
+class Widget;
+class VolumeWidget;
+class Panel;
+} // namespace Player
+} // namespace Media
+
 namespace Ui {
 class PeerAvatarButton;
+class PlainShadow;
+class DropdownMenu;
 } // namespace Ui
 
 namespace Window {
+class PlayerWrapWidget;
 class TopBarWidget;
 class SectionMemento;
 class SectionWidget;
@@ -44,9 +60,7 @@ class ConfirmBox;
 class DialogsWidget;
 class HistoryWidget;
 class OverviewWidget;
-class PlayerWidget;
 class HistoryHider;
-class Dropdown;
 
 enum StackItemType {
 	HistoryStackItem,
@@ -121,41 +135,32 @@ enum NotifySettingStatus {
 
 namespace InlineBots {
 namespace Layout {
-
 class ItemBase;
-
 } // namespace Layout
 } // namespace InlineBots
 
-class MainWidget : public TWidget, public RPCSender {
+class MainWidget : public TWidget, public RPCSender, private base::Subscriber {
 	Q_OBJECT
 
 public:
+	MainWidget(QWidget *parent);
 
-	MainWidget(MainWindow *window);
-
-	void paintEvent(QPaintEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
-	void keyPressEvent(QKeyEvent *e) override;
-
-	void updateAdaptiveLayout();
 	bool needBackButton();
 
 	// Temporary methods, while top bar was not done inside HistoryWidget / OverviewWidget.
-	void paintTopBar(Painter &p, float64 over, int32 decreaseWidth);
+	bool paintTopBar(Painter &, int decreaseWidth, TimeMs ms);
 	QRect getMembersShowAreaGeometry() const;
 	void setMembersShowAreaActive(bool active);
 	Window::TopBarWidget *topBar();
+	int backgroundFromY() const;
 
-	PlayerWidget *player();
 	int contentScrollAddToY() const;
 
-	void animShow(const QPixmap &bgAnimCache, bool back = false);
-	void step_show(float64 ms, bool timer);
-	void animStop_show();
+	void showAnimated(const QPixmap &bgAnimCache, bool back = false);
 
 	void start(const MTPUser &user);
 
+	void checkStartUrl();
 	void openLocalUrl(const QString &str);
 	void openPeerByName(const QString &name, MsgId msgId = ShowAtUnreadMsgId, const QString &startToken = QString());
 	void joinGroupByHash(const QString &hash);
@@ -175,7 +180,7 @@ public:
 	void removeDialog(History *history);
 	void dlgUpdated();
 	void dlgUpdated(Dialogs::Mode list, Dialogs::Row *row);
-	void dlgUpdated(History *row, MsgId msgId);
+	void dlgUpdated(PeerData *peer, MsgId msgId);
 
 	void windowShown();
 
@@ -209,10 +214,8 @@ public:
 	QRect historyRect() const;
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
 
-	void onSendFileConfirm(const FileLoadResultPtr &file, bool ctrlShiftEnter);
-	void onSendFileCancel(const FileLoadResultPtr &file);
-	void onShareContactConfirm(const QString &phone, const QString &fname, const QString &lname, MsgId replyTo, bool ctrlShiftEnter);
-	void onShareContactCancel();
+	void onSendFileConfirm(const FileLoadResultPtr &file);
+	bool onSendSticker(DocumentData *sticker);
 
 	void destroyData();
 	void updateOnlineDisplayIn(int32 msecs);
@@ -220,7 +223,7 @@ public:
 	bool isActive() const;
 	bool doWeReadServerHistory() const;
 	bool lastWasOnline() const;
-	uint64 lastSetOnline() const;
+	TimeMs lastSetOnline() const;
 
 	void saveDraftToCloud();
 	void applyCloudDraft(History *history);
@@ -228,18 +231,19 @@ public:
 
 	int32 dlgsWidth() const;
 
-	void forwardLayer(int32 forwardSelected = 0); // -1 - send paths
-	void deleteLayer(int32 selectedCount = -1); // -1 - context item, else selected, -2 - cancel upload
+	void forwardLayer(int forwardSelected = 0); // -1 - send paths
+	void deleteLayer(int selectedCount = 0); // 0 - context item
+	void cancelUploadLayer();
 	void shareContactLayer(UserData *contact);
 	void shareUrlLayer(const QString &url, const QString &text);
 	void inlineSwitchLayer(const QString &botAndQuery);
-	void hiderLayer(HistoryHider *h);
+	void hiderLayer(object_ptr<HistoryHider> h);
 	void noHider(HistoryHider *destroyed);
 	bool onForward(const PeerId &peer, ForwardWhatMessages what);
 	bool onShareUrl(const PeerId &peer, const QString &url, const QString &text);
 	bool onInlineSwitchChosen(const PeerId &peer, const QString &botAndQuery);
 	void onShareContact(const PeerId &peer, UserData *contact);
-	void onSendPaths(const PeerId &peer);
+	bool onSendPaths(const PeerId &peer);
 	void onFilesOrForwardDrop(const PeerId &peer, const QMimeData *data);
 	bool selectingPeer(bool withConfirm = false);
 	bool selectingPeerForInlineSwitch();
@@ -252,7 +256,7 @@ public:
 
 	bool leaveChatFailed(PeerData *peer, const RPCError &e);
 	void deleteHistoryAfterLeave(PeerData *peer, const MTPUpdates &updates);
-	void deleteMessages(PeerData *peer, const QVector<MTPint> &ids);
+	void deleteMessages(PeerData *peer, const QVector<MTPint> &ids, bool forEveryone);
 	void deletedContact(UserData *user, const MTPcontacts_Link &result);
 	void deleteConversation(PeerData *peer, bool deleteHistory = true);
 	void deleteAndExit(ChatData *chat);
@@ -260,7 +264,11 @@ public:
 	void deleteAllFromUser(ChannelData *channel, UserData *from);
 
 	void addParticipants(PeerData *chatOrChannel, const QVector<UserData*> &users);
-	bool addParticipantFail(UserData *user, const RPCError &e);
+	struct UserAndPeer {
+		UserData *user;
+		PeerData *peer;
+	};
+	bool addParticipantFail(UserAndPeer data, const RPCError &e);
 	bool addParticipantsFail(ChannelData *channel, const RPCError &e); // for multi invite in channels
 
 	void kickParticipant(ChatData *chat, UserData *user);
@@ -272,7 +280,7 @@ public:
 	bool sendMessageFail(const RPCError &error);
 
 	void forwardSelectedItems();
-	void deleteSelectedItems();
+	void confirmDeleteSelectedItems();
 	void clearSelectedItems();
 
 	Dialogs::IndexedList *contactsList();
@@ -292,35 +300,30 @@ public:
     void readServerHistory(History *history, ReadServerHistoryChecks checks = ReadServerHistoryChecks::OnlyIfUnread);
 	void unreadCountChanged(History *history);
 
-	uint64 animActiveTimeStart(const HistoryItem *msg) const;
+	TimeMs animActiveTimeStart(const HistoryItem *msg) const;
 	void stopAnimActive();
 
 	void sendBotCommand(PeerData *peer, UserData *bot, const QString &cmd, MsgId replyTo);
+	void hideSingleUseKeyboard(PeerData *peer, MsgId replyTo);
 	bool insertBotCommand(const QString &cmd, bool specialGif);
 
 	void searchMessages(const QString &query, PeerData *inPeer);
 	bool preloadOverview(PeerData *peer, MediaOverviewType type);
 	void preloadOverviews(PeerData *peer);
-	void mediaOverviewUpdated(PeerData *peer, MediaOverviewType type);
 	void changingMsgId(HistoryItem *row, MsgId newId);
-	void itemRemoved(HistoryItem *item);
 	void itemEdited(HistoryItem *item);
 
 	void loadMediaBack(PeerData *peer, MediaOverviewType type, bool many = false);
 
 	void checkLastUpdate(bool afterSleep);
-	void showAddContact();
-	void showNewGroup();
 
-	void serviceNotification(const QString &msg, const MTPMessageMedia &media);
+	void serviceNotification(const TextWithEntities &message, const MTPMessageMedia &media, int32 date);
 	void serviceHistoryDone(const MTPmessages_Messages &msgs);
 	bool serviceHistoryFail(const RPCError &error);
 
 	bool isIdle() const;
 
-	void clearCachedBackground();
 	QPixmap cachedBackground(const QRect &forRect, int &x, int &y);
-	void backgroundParams(const QRect &forRect, QRect &to, QRect &from) const;
 	void updateScrollColors();
 
 	void setChatBackground(const App::WallPaper &wp);
@@ -337,7 +340,6 @@ public:
 
 	bool hasForwardingItems();
 	void fillForwardingInfo(Text *&from, Text *&text, bool &serviceColor, ImagePtr &preview);
-	void updateForwardingTexts();
 	void cancelForwarding();
 	void finishForwarding(History *hist, bool silent); // send them
 
@@ -345,6 +347,7 @@ public:
 	void mediaMarkRead(const HistoryItemsMap &items);
 
 	void webPageUpdated(WebPageData *page);
+	void gameUpdated(GameData *game);
 	void updateMutedIn(int32 seconds);
 
 	void updateStickers();
@@ -364,19 +367,25 @@ public:
 
 	void scheduleViewIncrement(HistoryItem *item);
 
+	void fillPeerMenu(PeerData *peer, base::lambda<QAction*(const QString &text, base::lambda<void()> &&handler)> &&callback, bool pinToggle);
+
 	void gotRangeDifference(ChannelData *channel, const MTPupdates_ChannelDifference &diff);
 	void onSelfParticipantUpdated(ChannelData *channel);
 
 	bool contentOverlapped(const QRect &globalRect);
 
-	QPixmap grabTopBar();
-	QPixmap grabInner();
+	base::Observable<PeerData*> &searchInPeerChanged() {
+		return _searchInPeerChanged;
+	}
+	base::Observable<PeerData*> &historyPeerChanged() {
+		return _historyPeerChanged;
+	}
 
 	void rpcClear() override;
 
 	bool isItemVisible(HistoryItem *item);
 
-	void closePlayer();
+	void documentLoadProgress(DocumentData *document);
 
 	void app_sendBotCallback(const HistoryMessageReplyMarkup::Button *button, const HistoryItem *msg, int row, int col);
 
@@ -391,7 +400,7 @@ public:
 	void notify_inlineBotRequesting(bool requesting);
 	void notify_replyMarkupUpdated(const HistoryItem *item);
 	void notify_inlineKeyboardMoved(const HistoryItem *item, int oldKeyboardTop, int newKeyboardTop);
-	bool notify_switchInlineBotButtonReceived(const QString &query);
+	bool notify_switchInlineBotButtonReceived(const QString &query, UserData *samePeerBot, MsgId samePeerReplyTo);
 	void notify_userIsBotChanged(UserData *bot);
 	void notify_userIsContactChanged(UserData *user, bool fromThisApp);
 	void notify_migrateUpdated(PeerData *peer);
@@ -408,7 +417,6 @@ public:
 	~MainWidget();
 
 signals:
-
 	void peerUpdated(PeerData *peer);
 	void peerNameChanged(PeerData *peer, const PeerData::Names &oldNames, const PeerData::NameFirstChars &oldChars);
 	void peerPhotoChanged(PeerData *peer);
@@ -418,19 +426,15 @@ signals:
 	void savedGifsUpdated();
 
 public slots:
+	void webPagesOrGamesUpdate();
 
-	void webPagesUpdate();
-
-	void audioPlayProgress(const AudioMsgId &audioId);
 	void documentLoadProgress(FileLoader *loader);
 	void documentLoadFailed(FileLoader *loader, bool started);
-	void documentLoadRetry();
 	void inlineResultLoadProgress(FileLoader *loader);
 	void inlineResultLoadFailed(FileLoader *loader, bool started);
 
 	void dialogsCancelled();
 
-	void onParentResize(const QSize &newSize);
 	void getDifference();
 	void onGetDifferenceTimeByPts();
 	void onGetDifferenceTimeAfterFail();
@@ -454,8 +458,6 @@ public slots:
 	void onAudiosSelect();
 	void onLinksSelect();
 
-	void onForwardCancel(QObject *obj = 0);
-
 	void onCacheBackground();
 
 	void onInviteImport();
@@ -468,18 +470,31 @@ public slots:
 	void onViewsIncrement();
 	void onActiveChannelUpdateFull();
 
-	void onDownloadPathSettings();
-
-	void onSharePhoneWithBot(PeerData *recipient);
-
 	void ui_showPeerHistoryAsync(quint64 peerId, qint32 showAtMsgId, Ui::ShowWay way);
 	void ui_autoplayMediaInlineAsync(qint32 channelId, qint32 msgId);
 
-private slots:
-
-	void onDeletePhotoSure();
+protected:
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
 
 private:
+	void animationCallback();
+	void updateAdaptiveLayout();
+	void handleAudioUpdate(const AudioMsgId &audioId);
+	void updateMediaPlayerPosition();
+	void updateMediaPlaylistPosition(int x);
+	void updateControlsGeometry();
+
+	void updateForwardingTexts();
+	void updateForwardingItemRemovedSubscription();
+
+	void createPlayer();
+	void switchToPanelPlayer();
+	void switchToFixedPlayer();
+	void closeBothPlayers();
+	void playerHeightUpdated();
+
 	void sendReadRequest(PeerData *peer, MsgId upTo);
 	void channelReadDone(PeerData *peer, const MTPBool &result);
 	void historyReadDone(PeerData *peer, const MTPmessages_AffectedMessages &result);
@@ -488,9 +503,10 @@ private:
 
 	void messagesAffected(PeerData *peer, const MTPmessages_AffectedMessages &result);
 	void overviewLoaded(History *history, const MTPmessages_Messages &result, mtpRequestId req);
+	void mediaOverviewUpdated(const Notify::PeerUpdate &update);
 
 	Window::SectionSlideParams prepareShowAnimation(bool willHaveTopBarShadow);
-	void showWideSectionAnimated(const Window::SectionMemento *memento, bool back);
+	void showWideSectionAnimated(const Window::SectionMemento *memento, bool back, bool saveInStack);
 
 	// All this methods use the prepareShowAnimation().
 	Window::SectionSlideParams prepareWideSectionAnimation(Window::SectionWidget *section);
@@ -502,25 +518,23 @@ private:
 
 	bool _started = false;
 
-	uint64 failedObjId = 0;
-	QString failedFileName;
-	void loadFailed(mtpFileLoader *loader, bool started, const char *retrySlot);
-
 	SelectedItemSet _toForward;
 	Text _toForwardFrom, _toForwardText;
 	int32 _toForwardNameVersion = 0;
+	int _forwardingItemRemovedSubscription = 0;
 
-	QMap<WebPageId, bool> _webPagesUpdated;
-	QTimer _webPageUpdater;
+	OrderedSet<WebPageId> _webPagesUpdated;
+	OrderedSet<GameId> _gamesUpdated;
+	QTimer _webPageOrGameUpdater;
 
 	SingleTimer _updateMutedTimer;
 
-	enum GetChannelDifferenceFrom {
-		GetChannelDifferenceFromUnknown,
-		GetChannelDifferenceFromPtsGap,
-		GetChannelDifferenceFromFail,
+	enum class ChannelDifferenceRequest {
+		Unknown,
+		PtsGapOrShortPoll,
+		AfterFail,
 	};
-	void getChannelDifference(ChannelData *channel, GetChannelDifferenceFrom from = GetChannelDifferenceFromUnknown);
+	void getChannelDifference(ChannelData *channel, ChannelDifferenceRequest from = ChannelDifferenceRequest::Unknown);
 	void gotDifference(const MTPupdates_Difference &diff);
 	bool failDifference(const RPCError &e);
 	void feedDifference(const MTPVector<MTPUser> &users, const MTPVector<MTPChat> &chats, const MTPVector<MTPMessage> &msgs, const MTPVector<MTPUpdate> &other);
@@ -562,23 +576,32 @@ private:
 	void overviewPreloaded(PeerData *data, const MTPmessages_Messages &result, mtpRequestId req);
 	bool overviewFailed(PeerData *data, const RPCError &error, mtpRequestId req);
 
+	void clearCachedBackground();
+
+	base::Observable<PeerData*> _searchInPeerChanged;
+	base::Observable<PeerData*> _historyPeerChanged;
+
 	Animation _a_show;
+	bool _showBack = false;
 	QPixmap _cacheUnder, _cacheOver;
-	anim::ivalue a_coordUnder, a_coordOver;
-	anim::fvalue a_shadow;
 
 	int _dialogsWidth;
 
-	PlainShadow _sideShadow;
+	object_ptr<Ui::PlainShadow> _sideShadow;
+	object_ptr<DialogsWidget> _dialogs;
+	object_ptr<HistoryWidget> _history;
+	object_ptr<Window::SectionWidget> _wideSection = { nullptr };
+	object_ptr<OverviewWidget> _overview = { nullptr };
+	object_ptr<Window::TopBarWidget> _topBar;
 
-	ChildWidget<DialogsWidget> _dialogs;
-	ChildWidget<HistoryWidget> _history;
-	ChildWidget<Window::SectionWidget> _wideSection = { nullptr };
-	ChildWidget<OverviewWidget> _overview = { nullptr };
-	ChildWidget<PlayerWidget> _player;
-	ChildWidget<Window::TopBarWidget> _topBar;
-	ConfirmBox *_forwardConfirm = nullptr; // for single column layout
-	ChildWidget<HistoryHider> _hider = { nullptr };
+	object_ptr<Window::PlayerWrapWidget> _player = { nullptr };
+	object_ptr<Media::Player::VolumeWidget> _playerVolume = { nullptr };
+	object_ptr<Media::Player::Panel> _playerPlaylist;
+	object_ptr<Media::Player::Panel> _playerPanel;
+	bool _playerUsingPanel = false;
+
+	QPointer<ConfirmBox> _forwardConfirm; // for single column layout
+	object_ptr<HistoryHider> _hider = { nullptr };
 	std_::vector_of_moveable<std_::unique_ptr<StackItem>> _stack;
 	PeerData *_peerInStack = nullptr;
 	MsgId _msgIdInStack = 0;
@@ -586,7 +609,7 @@ private:
 	int _playerHeight = 0;
 	int _contentScrollAddToY = 0;
 
-	ChildWidget<Dropdown> _mediaType;
+	object_ptr<Ui::DropdownMenu> _mediaType;
 	int32 _mediaTypeMask = 0;
 
 	int32 updDate = 0;
@@ -603,12 +626,12 @@ private:
 		return _ptsWaiter.requesting();
 	}
 
-	typedef QMap<ChannelData*, uint64> ChannelGetDifferenceTime;
+	typedef QMap<ChannelData*, TimeMs> ChannelGetDifferenceTime;
 	ChannelGetDifferenceTime _channelGetDifferenceTimeByPts, _channelGetDifferenceTimeAfterFail;
-	uint64 _getDifferenceTimeByPts = 0;
-	uint64 _getDifferenceTimeAfterFail = 0;
+	TimeMs _getDifferenceTimeByPts = 0;
+	TimeMs _getDifferenceTimeAfterFail = 0;
 
-	bool getDifferenceTimeChanged(ChannelData *channel, int32 ms, ChannelGetDifferenceTime &channelCurTime, uint64 &curTime);
+	bool getDifferenceTimeChanged(ChannelData *channel, int32 ms, ChannelGetDifferenceTime &channelCurTime, TimeMs &curTime);
 
 	SingleTimer _byPtsTimer;
 
@@ -620,7 +643,7 @@ private:
 	mtpRequestId _onlineRequest = 0;
 	SingleTimer _onlineTimer, _onlineUpdater, _idleFinishTimer;
 	bool _lastWasOnline = false;
-	uint64 _lastSetOnline = 0;
+	TimeMs _lastSetOnline = 0;
 	bool _isIdle = false;
 
 	QSet<PeerData*> updateNotifySettingPeers;
@@ -639,7 +662,7 @@ private:
 	ChannelFailDifferenceTimeout _channelFailDifferenceTimeout; // growing timeout for getChannelDifference calls, if it fails
 	SingleTimer _failDifferenceTimer;
 
-	uint64 _lastUpdateTime = 0;
+	TimeMs _lastUpdateTime = 0;
 	bool _handlingChannelDifference = false;
 
 	QPixmap _cachedBackground;

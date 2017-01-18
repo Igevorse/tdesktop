@@ -16,39 +16,41 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "core/basic_types.h"
+#include "history.h"
+#include "history/history_item.h"
+#include "history/history_media.h"
+#include "history/history_message.h"
+#include "layout.h"
 
 class AppClass;
 class MainWindow;
 class MainWidget;
-class SettingsWidget;
 class ApiWrap;
 class FileUploader;
 
-#include "history.h"
-#include "layout.h"
+using HistoryItemsMap = OrderedSet<HistoryItem*>;
+using PhotoItems = QHash<PhotoData*, HistoryItemsMap>;
+using DocumentItems = QHash<DocumentData*, HistoryItemsMap>;
+using WebPageItems = QHash<WebPageData*, HistoryItemsMap>;
+using GameItems = QHash<GameData*, HistoryItemsMap>;
+using SharedContactItems = QHash<int32, HistoryItemsMap>;
+using GifItems = QHash<Media::Clip::Reader*, HistoryItem*>;
 
-typedef QMap<HistoryItem*, NullType> HistoryItemsMap;
-typedef QHash<PhotoData*, HistoryItemsMap> PhotoItems;
-typedef QHash<DocumentData*, HistoryItemsMap> DocumentItems;
-typedef QHash<WebPageData*, HistoryItemsMap> WebPageItems;
-typedef QHash<int32, HistoryItemsMap> SharedContactItems;
-typedef QHash<Media::Clip::Reader*, HistoryItem*> GifItems;
+using PhotosData = QHash<PhotoId, PhotoData*>;
+using DocumentsData = QHash<DocumentId, DocumentData*>;
 
-typedef QHash<PhotoId, PhotoData*> PhotosData;
-typedef QHash<DocumentId, DocumentData*> DocumentsData;
-
-class LayeredWidget;
+struct LocationCoords;
+struct LocationData;
 
 namespace App {
 	AppClass *app();
 	MainWindow *wnd();
 	MainWidget *main();
-	SettingsWidget *settings();
 	bool passcoded();
 	FileUploader *uploader();
 	ApiWrap *api();
@@ -76,8 +78,7 @@ namespace App {
 	void feedChatAdmins(const MTPDupdateChatAdmins &d, bool emitPeerUpdated = true);
 	void feedParticipantAdmin(const MTPDupdateChatParticipantAdmin &d, bool emitPeerUpdated = true);
 	bool checkEntitiesAndViewsUpdate(const MTPDmessage &m); // returns true if item found and it is not detached
-	void updateEditedMessage(const MTPDmessage &m);
-	void updateEditedMessageToEmpty(PeerId peerId, MsgId msgId);
+	void updateEditedMessage(const MTPMessage &m);
 	void addSavedGif(DocumentData *doc);
 	void checkSavedGif(HistoryItem *item);
 	void feedMsgs(const QVector<MTPMessage> &msgs, NewMessageType type);
@@ -95,14 +96,15 @@ namespace App {
 	StorageImageLocation imageLocation(const MTPPhotoSize &size);
 
 	PhotoData *feedPhoto(const MTPPhoto &photo, const PreparedPhotoThumbs &thumbs);
-	PhotoData *feedPhoto(const MTPPhoto &photo, PhotoData *convert = 0);
-	PhotoData *feedPhoto(const MTPDphoto &photo, PhotoData *convert = 0);
+	PhotoData *feedPhoto(const MTPPhoto &photo, PhotoData *convert = nullptr);
+	PhotoData *feedPhoto(const MTPDphoto &photo, PhotoData *convert = nullptr);
 	DocumentData *feedDocument(const MTPdocument &document, const QPixmap &thumb);
-	DocumentData *feedDocument(const MTPdocument &document, DocumentData *convert = 0);
-	DocumentData *feedDocument(const MTPDdocument &document, DocumentData *convert = 0);
-	WebPageData *feedWebPage(const MTPDwebPage &webpage, WebPageData *convert = 0);
-	WebPageData *feedWebPage(const MTPDwebPagePending &webpage, WebPageData *convert = 0);
+	DocumentData *feedDocument(const MTPdocument &document, DocumentData *convert = nullptr);
+	DocumentData *feedDocument(const MTPDdocument &document, DocumentData *convert = nullptr);
+	WebPageData *feedWebPage(const MTPDwebPage &webpage, WebPageData *convert = nullptr);
+	WebPageData *feedWebPage(const MTPDwebPagePending &webpage, WebPageData *convert = nullptr);
 	WebPageData *feedWebPage(const MTPWebPage &webpage);
+	GameData *feedGame(const MTPDgame &game, GameData *convert = nullptr);
 
 	PeerData *peer(const PeerId &id, PeerData::LoadedStatus restriction = PeerData::NotLoaded);
 	inline UserData *user(const PeerId &id, PeerData::LoadedStatus restriction = PeerData::NotLoaded) {
@@ -153,7 +155,9 @@ namespace App {
 	DocumentData *document(const DocumentId &document);
 	DocumentData *documentSet(const DocumentId &document, DocumentData *convert, const uint64 &access, int32 version, int32 date, const QVector<MTPDocumentAttribute> &attributes, const QString &mime, const ImagePtr &thumb, int32 dc, int32 size, const StorageImageLocation &thumbLocation);
 	WebPageData *webPage(const WebPageId &webPage);
-	WebPageData *webPageSet(const WebPageId &webPage, WebPageData *convert, const QString &, const QString &url, const QString &displayUrl, const QString &siteName, const QString &title, const QString &description, PhotoData *photo, DocumentData *doc, int32 duration, const QString &author, int32 pendingTill);
+	WebPageData *webPageSet(const WebPageId &webPage, WebPageData *convert, const QString &type, const QString &url, const QString &displayUrl, const QString &siteName, const QString &title, const QString &description, PhotoData *photo, DocumentData *doc, int32 duration, const QString &author, int32 pendingTill);
+	GameData *game(const GameId &game);
+	GameData *gameSet(const GameId &game, GameData *convert, const uint64 &accessHash, const QString &shortName, const QString &title, const QString &description, PhotoData *photo, DocumentData *doc);
 	LocationData *location(const LocationCoords &coords);
 	void forgetMedia();
 
@@ -208,7 +212,6 @@ namespace App {
 	void clearMousedItems();
 
 	const style::font &monofont();
-	const QPixmap &sprite();
 	const QPixmap &emoji();
 	const QPixmap &emojiLarge();
 	const QPixmap &emojiSingle(EmojiPtr emoji, int32 fontHeight);
@@ -233,9 +236,12 @@ namespace App {
 	void allDraftsSaved();
 	LaunchState launchState();
 	void setLaunchState(LaunchState state);
+	void restart();
 
-	QImage readImage(QByteArray data, QByteArray *format = 0, bool opaque = true, bool *animated = 0);
-	QImage readImage(const QString &file, QByteArray *format = 0, bool opaque = true, bool *animated = 0, QByteArray *content = 0);
+	constexpr auto kFileSizeLimit = 1500 * 1024 * 1024; // Load files up to 1500mb
+	constexpr auto kImageSizeLimit = 64 * 1024 * 1024; // Open images up to 64mb jpg/png/gif
+	QImage readImage(QByteArray data, QByteArray *format = nullptr, bool opaque = true, bool *animated = nullptr);
+	QImage readImage(const QString &file, QByteArray *format = nullptr, bool opaque = true, bool *animated = nullptr, QByteArray *content = 0);
 	QPixmap pixmapFromImageInPlace(QImage &&image);
 
 	void regPhotoItem(PhotoData *data, HistoryItem *item);
@@ -251,6 +257,10 @@ namespace App {
 	void regWebPageItem(WebPageData *data, HistoryItem *item);
 	void unregWebPageItem(WebPageData *data, HistoryItem *item);
 	const WebPageItems &webPageItems();
+
+	void regGameItem(GameData *data, HistoryItem *item);
+	void unregGameItem(GameData *data, HistoryItem *item);
+	const GameItems &gameItems();
 
 	void regSharedContactItem(int32 userId, HistoryItem *item);
 	void unregSharedContactItem(int32 userId, HistoryItem *item);
@@ -268,32 +278,47 @@ namespace App {
 	void setProxySettings(QNetworkAccessManager &manager);
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	QNetworkProxy getHttpProxySettings();
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 	void setProxySettings(QTcpSocket &socket);
 
+	enum class RectPart {
+		None        = 0x000,
+		TopLeft     = 0x001,
+		Top         = 0x002,
+		TopRight    = 0x004,
+		Left        = 0x008,
+		Center      = 0x010,
+		Right       = 0x020,
+		BottomLeft  = 0x040,
+		Bottom      = 0x080,
+		BottomRight = 0x100,
+		TopFull     = 0x007,
+		LeftFull    = 0x049,
+		RightFull   = 0x124,
+		BottomFull  = 0x1c0,
+		NoTopBottom = 0x038,
+		NoLeftRight = 0x092,
+		Full        = 0x1ff,
+	};
+	Q_DECLARE_FLAGS(RectParts, RectPart);
+	Q_DECLARE_OPERATORS_FOR_FLAGS(RectParts);
+
+	void complexOverlayRect(Painter &p, QRect rect, ImageRoundRadius radius, ImageRoundCorners corners);
+	void complexLocationRect(Painter &p, QRect rect, ImageRoundRadius radius, ImageRoundCorners corners);
+
 	QImage **cornersMask(ImageRoundRadius radius);
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, RoundCorners index, const style::color *sh = 0);
-	inline void roundRect(Painter &p, const QRect &rect, const style::color &bg, RoundCorners index, const style::color *sh = 0) {
-		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, index, sh);
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, RoundCorners index, const style::color *shadow = nullptr, RectParts parts = RectPart::Full);
+	inline void roundRect(Painter &p, const QRect &rect, style::color bg, RoundCorners index, const style::color *shadow = nullptr, RectParts parts = RectPart::Full) {
+		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, index, shadow, parts);
 	}
-	void roundShadow(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &sh, RoundCorners index);
-	inline void roundShadow(Painter &p, const QRect &rect, const style::color &sh, RoundCorners index) {
-		return roundShadow(p, rect.x(), rect.y(), rect.width(), rect.height(), sh, index);
+	void roundShadow(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color shadow, RoundCorners index, RectParts parts = RectPart::Full);
+	inline void roundShadow(Painter &p, const QRect &rect, style::color shadow, RoundCorners index, RectParts parts = RectPart::Full) {
+		return roundShadow(p, rect.x(), rect.y(), rect.width(), rect.height(), shadow, index, parts);
 	}
-	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, const style::color &bg, ImageRoundRadius radius);
-	inline void roundRect(Painter &p, const QRect &rect, const style::color &bg, ImageRoundRadius radius) {
-		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, radius);
+	void roundRect(Painter &p, int32 x, int32 y, int32 w, int32 h, style::color bg, ImageRoundRadius radius, RectParts parts = RectPart::Full);
+	inline void roundRect(Painter &p, const QRect &rect, style::color bg, ImageRoundRadius radius, RectParts parts = RectPart::Full) {
+		return roundRect(p, rect.x(), rect.y(), rect.width(), rect.height(), bg, radius, parts);
 	}
-
-	void initBackground(int32 id = DefaultChatBackground, const QImage &p = QImage(), bool nowrite = false);
-
-	const style::color &msgServiceBg();
-	const style::color &msgServiceSelectBg();
-	const style::color &historyScrollBarColor();
-	const style::color &historyScrollBgColor();
-	const style::color &historyScrollBarOverColor();
-	const style::color &historyScrollBgOverColor();
-	const style::color &introPointHoverColor();
 
 	struct WallPaper {
 		WallPaper(int32 id, ImagePtr thumb, ImagePtr full) : id(id), thumb(thumb), full(full) {

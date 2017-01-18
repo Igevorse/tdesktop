@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "media/media_audio_loaders.h"
@@ -27,6 +27,8 @@ Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
 
 AudioPlayerLoaders::AudioPlayerLoaders(QThread *thread) : _fromVideoNotify(this, "onVideoSoundAdded") {
 	moveToThread(thread);
+	connect(thread, SIGNAL(started()), this, SLOT(onInit()));
+	connect(thread, SIGNAL(finished()), this, SLOT(deleteLater()));
 }
 
 void AudioPlayerLoaders::feedFromVideo(VideoSoundPart &&part) {
@@ -75,7 +77,7 @@ AudioPlayerLoaders::~AudioPlayerLoaders() {
 }
 
 void AudioPlayerLoaders::clearFromVideoQueue() {
-	auto queue = createAndSwap(_fromVideoQueue);
+	auto queue = base::take(_fromVideoQueue);
 	for (auto &packetData : queue) {
 		AVPacket packet;
 		FFMpeg::packetFromDataWrap(packet, packetData);

@@ -16,12 +16,13 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "platform/linux/linux_libs.h"
 
 #include "platform/linux/linux_gdk_helper.h"
+#include "platform/linux/linux_libnotify.h"
 
 namespace Platform {
 namespace Libs {
@@ -92,10 +93,16 @@ bool setupGtkBase(QLibrary &lib_gtk) {
 	if (!load(lib_gtk, "g_type_check_instance_cast", g_type_check_instance_cast)) return false;
 	if (!load(lib_gtk, "g_type_check_instance_is_a", g_type_check_instance_is_a)) return false;
 	if (!load(lib_gtk, "g_signal_connect_data", g_signal_connect_data)) return false;
+	if (!load(lib_gtk, "g_signal_handler_disconnect", g_signal_handler_disconnect)) return false;
 
 	if (!load(lib_gtk, "g_object_ref_sink", g_object_ref_sink)) return false;
 	if (!load(lib_gtk, "g_object_unref", g_object_unref)) return false;
 	if (!load(lib_gtk, "g_free", g_free)) return false;
+	if (!load(lib_gtk, "g_list_foreach", g_list_foreach)) return false;
+	if (!load(lib_gtk, "g_list_free", g_list_free)) return false;
+	if (!load(lib_gtk, "g_list_free_full", g_list_free_full)) return false;
+
+	if (!load(lib_gtk, "g_error_free", g_error_free)) return false;
 	if (!load(lib_gtk, "g_slist_free", g_slist_free)) return false;
 
 	DEBUG_LOG(("Library gtk functions loaded!"));
@@ -169,12 +176,14 @@ f_gtk_dialog_run gtk_dialog_run = nullptr;
 f_g_type_check_instance_cast g_type_check_instance_cast = nullptr;
 f_g_type_check_instance_is_a g_type_check_instance_is_a = nullptr;
 f_g_signal_connect_data g_signal_connect_data = nullptr;
+f_g_signal_handler_disconnect g_signal_handler_disconnect = nullptr;
 f_app_indicator_new app_indicator_new = nullptr;
 f_app_indicator_set_status app_indicator_set_status = nullptr;
 f_app_indicator_set_menu app_indicator_set_menu = nullptr;
 f_app_indicator_set_icon_full app_indicator_set_icon_full = nullptr;
 f_gdk_init_check gdk_init_check = nullptr;
 f_gdk_pixbuf_new_from_data gdk_pixbuf_new_from_data = nullptr;
+f_gdk_pixbuf_new_from_file gdk_pixbuf_new_from_file = nullptr;
 f_gtk_status_icon_new_from_pixbuf gtk_status_icon_new_from_pixbuf = nullptr;
 f_gtk_status_icon_set_from_pixbuf gtk_status_icon_set_from_pixbuf = nullptr;
 f_gtk_status_icon_new_from_file gtk_status_icon_new_from_file = nullptr;
@@ -191,12 +200,16 @@ f_g_object_ref_sink g_object_ref_sink = nullptr;
 f_g_object_unref g_object_unref = nullptr;
 f_g_idle_add g_idle_add = nullptr;
 f_g_free g_free = nullptr;
+f_g_list_foreach g_list_foreach = nullptr;
+f_g_list_free g_list_free = nullptr;
+f_g_list_free_full g_list_free_full = nullptr;
+f_g_error_free g_error_free = nullptr;
 f_g_slist_free g_slist_free = nullptr;
 #ifndef TDESKTOP_DISABLE_UNITY_INTEGRATION
 f_unity_launcher_entry_set_count unity_launcher_entry_set_count = nullptr;
 f_unity_launcher_entry_set_count_visible unity_launcher_entry_set_count_visible = nullptr;
 f_unity_launcher_entry_get_for_desktop_id unity_launcher_entry_get_for_desktop_id = nullptr;
-#endif // TDESKTOP_DISABLE_UNITY_INTEGRATION
+#endif // !TDESKTOP_DISABLE_UNITY_INTEGRATION
 
 void start() {
 	DEBUG_LOG(("Loading libraries"));
@@ -233,6 +246,7 @@ void start() {
 	if (gtkLoaded) {
 		load(lib_gtk, "gdk_init_check", gdk_init_check);
 		load(lib_gtk, "gdk_pixbuf_new_from_data", gdk_pixbuf_new_from_data);
+		load(lib_gtk, "gdk_pixbuf_new_from_file", gdk_pixbuf_new_from_file);
 		load(lib_gtk, "gtk_status_icon_new_from_pixbuf", gtk_status_icon_new_from_pixbuf);
 		load(lib_gtk, "gtk_status_icon_set_from_pixbuf", gtk_status_icon_set_from_pixbuf);
 		load(lib_gtk, "gtk_status_icon_new_from_file", gtk_status_icon_new_from_file);
@@ -257,7 +271,7 @@ void start() {
 	}
 
 #ifndef TDESKTOP_DISABLE_UNITY_INTEGRATION
-	if (QString(getenv("XDG_CURRENT_DESKTOP")).toLower() == qstr("unity")) {
+	if (QString(getenv("XDG_CURRENT_DESKTOP")).toLower().split(':').contains(qstr("unity"))) {
 		QLibrary lib_unity(qstr("unity"), 9, 0);
 		loadLibrary(lib_unity, "unity", 9);
 
@@ -265,7 +279,11 @@ void start() {
 		load(lib_unity, "unity_launcher_entry_set_count", unity_launcher_entry_set_count);
 		load(lib_unity, "unity_launcher_entry_set_count_visible", unity_launcher_entry_set_count_visible);
 	}
-#endif // TDESKTOP_DISABLE_UNITY_INTEGRATION
+#endif // !TDESKTOP_DISABLE_UNITY_INTEGRATION
+
+	if (gtkLoaded) {
+		startLibNotify();
+	}
 }
 
 } // namespace Libs

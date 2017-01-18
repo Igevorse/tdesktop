@@ -16,193 +16,147 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
-#include "abstractbox.h"
+#include "boxes/abstractbox.h"
+#include "ui/filedialog.h"
 
-class AddContactBox : public AbstractBox, public RPCSender {
+class ConfirmBox;
+
+namespace Ui {
+class FlatLabel;
+class InputField;
+class PhoneInput;
+class InputArea;
+class UsernameInput;
+class Checkbox;
+class Radiobutton;
+class LinkButton;
+class NewAvatarButton;
+} // namespace Ui
+
+class AddContactBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
+	AddContactBox(QWidget*, QString fname = QString(), QString lname = QString(), QString phone = QString());
+	AddContactBox(QWidget*, UserData *user);
 
-	AddContactBox(QString fname = QString(), QString lname = QString(), QString phone = QString());
-	AddContactBox(UserData *user);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
+protected:
+	void prepare() override;
 
-	void setInnerFocus() {
-		_first.setFocus();
-	}
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
-public slots:
+	void setInnerFocus() override;
 
+private slots:
 	void onSubmit();
 	void onSave();
 	void onRetry();
 
-protected:
-
-	void hideAll();
-	void showAll();
-	void showDone();
-
 private:
-
+	void updateButtons();
 	void onImportDone(const MTPcontacts_ImportedContacts &res);
 
 	void onSaveUserDone(const MTPcontacts_ImportedContacts &res);
 	bool onSaveUserFail(const RPCError &e);
 
-	void initBox();
-
 	UserData *_user = nullptr;
-	QString _boxTitle;
 
-	BoxButton _save, _cancel, _retry;
-	InputField _first, _last;
-	PhoneInput _phone;
+	object_ptr<Ui::InputField> _first;
+	object_ptr<Ui::InputField> _last;
+	object_ptr<Ui::PhoneInput> _phone;
 
-	bool _invertOrder;
+	bool _retrying = false;
+	bool _invertOrder = false;
 
 	uint64 _contactId = 0;
 
 	mtpRequestId _addRequest = 0;
 	QString _sentName;
+
 };
 
-class NewGroupBox : public AbstractBox {
+class GroupInfoBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
-
-	NewGroupBox();
-	void keyPressEvent(QKeyEvent *e);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
-
-public slots:
-
-	void onNext();
+	GroupInfoBox(QWidget*, CreatingGroupType creating, bool fromTypeChoose);
 
 protected:
+	void prepare() override;
+	void setInnerFocus() override;
 
-	void hideAll();
-	void showAll();
-	void showDone();
+	void resizeEvent(QResizeEvent *e) override;
 
-private:
-
-	Radiobutton _group, _channel;
-	int32 _aboutGroupWidth, _aboutGroupHeight;
-	Text _aboutGroup, _aboutChannel;
-	BoxButton _next, _cancel;
-
-};
-
-class GroupInfoBox : public AbstractBox, public RPCSender {
-	Q_OBJECT
-
-public:
-
-	GroupInfoBox(CreatingGroupType creating, bool fromTypeChoose);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
-	void mouseMoveEvent(QMouseEvent *e);
-	void mousePressEvent(QMouseEvent *e);
-	void leaveEvent(QEvent *e);
-
-	void setInnerFocus() {
-		_title.setFocus();
-	}
-
-public slots:
-
-	void onPhoto();
+private slots:
 	void onPhotoReady(const QImage &img);
 
 	void onNext();
 	void onNameSubmit();
 	void onDescriptionResized();
-
-protected:
-
-	void hideAll();
-	void showAll();
-	void showDone();
+	void onClose() {
+		closeBox();
+	}
 
 private:
-
-	void step_photoOver(float64 ms, bool timer);
-
-	QRect photoRect() const;
-
-	void updateMaxHeight();
-	void updateSelected(const QPoint &cursorGlobalPosition);
-	CreatingGroupType _creating;
-
-	anim::fvalue a_photoOver;
-	Animation _a_photoOver;
-	bool _photoOver;
-
-	InputField _title;
-	InputArea _description;
-
-	QImage _photoBig;
-	QPixmap _photoSmall;
-	BoxButton _next, _cancel;
-
-	// channel creation
-	int32 _creationRequestId;
-	ChannelData *_createdChannel;
+	void notifyFileQueryUpdated(const FileDialog::QueryUpdate &update);
 
 	void creationDone(const MTPUpdates &updates);
 	bool creationFail(const RPCError &e);
 	void exportDone(const MTPExportedChatInvite &result);
+
+	void updateMaxHeight();
+	void updateSelected(const QPoint &cursorGlobalPosition);
+
+	CreatingGroupType _creating;
+	bool _fromTypeChoose = false;
+
+	object_ptr<Ui::NewAvatarButton> _photo;
+	object_ptr<Ui::InputField> _title;
+	object_ptr<Ui::InputArea> _description = { nullptr };
+
+	QImage _photoImage;
+
+	// channel creation
+	mtpRequestId _creationRequestId = 0;
+	ChannelData *_createdChannel = nullptr;
+
+	FileDialog::QueryId _setPhotoFileQueryId = 0;
+
 };
 
-class SetupChannelBox : public AbstractBox, public RPCSender {
+class SetupChannelBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
+	SetupChannelBox(QWidget*, ChannelData *channel, bool existing = false);
 
-	SetupChannelBox(ChannelData *channel, bool existing = false);
-	void keyPressEvent(QKeyEvent *e);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
-	void mouseMoveEvent(QMouseEvent *e);
-	void mousePressEvent(QMouseEvent *e);
-	void leaveEvent(QEvent *e);
+	void setInnerFocus() override;
+	void closeHook() override;
 
-	void closePressed();
+protected:
+	void prepare() override;
 
-	void setInnerFocus() {
-		if (_link.isHidden()) {
-			setFocus();
-		} else {
-			_link.setFocus();
-		}
-	}
+	void keyPressEvent(QKeyEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void leaveEvent(QEvent *e) override;
 
-public slots:
-
+private slots:
 	void onSave();
 	void onChange();
 	void onCheck();
 
 	void onPrivacyChange();
 
-protected:
-
-	void hideAll();
-	void showAll();
-	void showDone();
-
 private:
-
 	void updateSelected(const QPoint &cursorGlobalPosition);
-	void step_goodFade(float64 ms, bool timer);
 
 	void onUpdateDone(const MTPBool &result);
 	bool onUpdateFail(const RPCError &error);
@@ -213,55 +167,47 @@ private:
 
 	void updateMaxHeight();
 
-	ChannelData *_channel;
-	bool _existing;
+	void showRevokePublicLinkBoxForEdit();
 
-	Radiobutton _public, _private;
+	ChannelData *_channel = nullptr;
+	bool _existing = false;
+
+	object_ptr<Ui::Radiobutton> _public;
+	object_ptr<Ui::Radiobutton> _private;
 	int32 _aboutPublicWidth, _aboutPublicHeight;
 	Text _aboutPublic, _aboutPrivate;
-	UsernameInput _link;
+
+	object_ptr<Ui::UsernameInput> _link;
+
 	QRect _invitationLink;
-	bool _linkOver;
-	BoxButton _save, _skip;
+	bool _linkOver = false;
+	bool _tooMuchUsernames = false;
 
-	bool _tooMuchUsernames;
-
-	mtpRequestId _saveRequestId, _checkRequestId;
+	mtpRequestId _saveRequestId = 0;
+	mtpRequestId _checkRequestId = 0;
 	QString _sentUsername, _checkUsername, _errorText, _goodText;
 
-	QString _goodTextLink;
-	anim::fvalue a_goodOpacity;
-	Animation _a_goodFade;
-
 	QTimer _checkTimer;
+
 };
 
-class EditNameTitleBox : public AbstractBox, public RPCSender {
+class EditNameTitleBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
+	EditNameTitleBox(QWidget*, PeerData *peer);
 
-	EditNameTitleBox(PeerData *peer);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
+protected:
+	void setInnerFocus() override;
+	void prepare() override;
 
-	void setInnerFocus() {
-		_first.setFocus();
-	}
+	void resizeEvent(QResizeEvent *e) override;
 
-public slots:
-
+private slots:
 	void onSave();
 	void onSubmit();
 
-protected:
-
-	void hideAll();
-	void showAll();
-	void showDone();
-
 private:
-
 	void onSaveSelfDone(const MTPUser &user);
 	bool onSaveSelfFail(const RPCError &error);
 
@@ -269,49 +215,41 @@ private:
 	bool onSaveChatFail(const RPCError &e);
 
 	PeerData *_peer;
-	QString _boxTitle;
 
-	BoxButton _save, _cancel;
-	InputField _first, _last;
+	object_ptr<Ui::InputField> _first;
+	object_ptr<Ui::InputField> _last;
 
-	bool _invertOrder;
+	bool _invertOrder = false;
 
-	mtpRequestId _requestId;
+	mtpRequestId _requestId = 0;
 	QString _sentName;
+
 };
 
-class EditChannelBox : public AbstractBox, public RPCSender {
+class EditChannelBox : public BoxContent, public RPCSender {
 	Q_OBJECT
 
 public:
+	EditChannelBox(QWidget*, ChannelData *channel);
 
-	EditChannelBox(ChannelData *channel);
-	void keyPressEvent(QKeyEvent *e);
-	void paintEvent(QPaintEvent *e);
-	void resizeEvent(QResizeEvent *e);
+protected:
+	void prepare() override;
+	void setInnerFocus() override;
 
-	void setInnerFocus() {
-		if (!_description.hasFocus()) {
-			_title.setFocus();
-		}
-	}
+	void keyPressEvent(QKeyEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
-public slots:
-
+private slots:
 	void peerUpdated(PeerData *peer);
 
 	void onSave();
 	void onDescriptionResized();
 	void onPublicLink();
-
-protected:
-
-	void hideAll();
-	void showAll();
-	void showDone();
+	void onClose() {
+		closeBox();
+	}
 
 private:
-
 	void updateMaxHeight();
 
 	void onSaveTitleDone(const MTPUpdates &updates);
@@ -324,13 +262,62 @@ private:
 
 	ChannelData *_channel;
 
-	BoxButton _save, _cancel;
-	InputField _title;
-	InputArea _description;
-	Checkbox _sign;
+	object_ptr<Ui::InputField> _title;
+	object_ptr<Ui::InputArea> _description;
+	object_ptr<Ui::Checkbox> _sign;
 
-	LinkButton _publicLink;
+	object_ptr<Ui::LinkButton> _publicLink;
 
-	mtpRequestId _saveTitleRequestId, _saveDescriptionRequestId, _saveSignRequestId;
+	mtpRequestId _saveTitleRequestId = 0;
+	mtpRequestId _saveDescriptionRequestId = 0;
+	mtpRequestId _saveSignRequestId = 0;
+
 	QString _sentTitle, _sentDescription;
+
+};
+
+class RevokePublicLinkBox : public BoxContent, public RPCSender {
+public:
+	RevokePublicLinkBox(QWidget*, base::lambda<void()> &&revokeCallback);
+
+protected:
+	void prepare() override;
+
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
+
+private:
+	void updateMaxHeight();
+	void updateSelected();
+
+	struct ChatRow {
+		PeerData *peer;
+		Text name, status;
+	};
+	void paintChat(Painter &p, const ChatRow &row, bool selected) const;
+
+	void getPublicDone(const MTPmessages_Chats &result);
+	bool getPublicFail(const RPCError &error);
+
+	void revokeLinkDone(const MTPBool &result);
+	bool revokeLinkFail(const RPCError &error);
+
+	PeerData *_selected = nullptr;
+	PeerData *_pressed = nullptr;
+
+	QVector<ChatRow> _rows;
+
+	int _rowsTop = 0;
+	int _rowHeight = 0;
+	int _revokeWidth = 0;
+
+	object_ptr<Ui::FlatLabel> _aboutRevoke;
+
+	base::lambda<void()> _revokeCallback;
+	mtpRequestId _revokeRequestId = 0;
+	QPointer<ConfirmBox> _weakRevokeConfirmBox;
+
 };

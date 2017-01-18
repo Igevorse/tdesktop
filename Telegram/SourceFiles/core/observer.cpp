@@ -16,100 +16,66 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "core/observer.h"
 
-namespace Notify {
+namespace base {
 namespace internal {
 namespace {
 
-struct StartCallbackData {
-	void *that;
-	StartCallback call;
-};
-struct FinishCallbackData {
-	void *that;
-	FinishCallback call;
-};
-struct UnregisterCallbackData {
-	void *that;
-	UnregisterCallback call;
-};
-using StartCallbacksList = QVector<StartCallbackData>;
-using FinishCallbacksList = QVector<FinishCallbackData>;
-NeverFreedPointer<StartCallbacksList> StartCallbacks;
-NeverFreedPointer<FinishCallbacksList> FinishCallbacks;
-UnregisterCallbackData UnregisterCallbacks[256]/* = { nullptr }*/;
+bool CantUseObservables = false;
 
-ObservedEvent LastRegisteredEvent/* = 0*/;
+struct ObservableListWrap {
+	~ObservableListWrap() {
+		CantUseObservables = true;
+	}
+	OrderedSet<ObservableCallHandlers*> list;
+};
+
+ObservableListWrap &PendingObservables() {
+	static ObservableListWrap result;
+	return result;
+}
+
+ObservableListWrap &ActiveObservables() {
+	static ObservableListWrap result;
+	return result;
+}
 
 } // namespace
-} // namespace internal
 
-void startObservers() {
-	if (!internal::StartCallbacks) return;
-
-	for (auto &callback : *internal::StartCallbacks) {
-		callback.call(callback.that);
-	}
+void RegisterPendingObservable(ObservableCallHandlers *handlers) {
+	if (CantUseObservables) return;
+	PendingObservables().list.insert(handlers);
+	Global::RefHandleObservables().call();
 }
 
-void finishObservers() {
-	if (!internal::FinishCallbacks) return;
-
-	for (auto &callback : *internal::FinishCallbacks) {
-		callback.call(callback.that);
-	}
-	internal::StartCallbacks.clear();
-	internal::FinishCallbacks.clear();
+void UnregisterActiveObservable(ObservableCallHandlers *handlers) {
+	if (CantUseObservables) return;
+	ActiveObservables().list.remove(handlers);
 }
 
-namespace internal {
-
-BaseObservedEventRegistrator::BaseObservedEventRegistrator(void *that
-, StartCallback startCallback
-, FinishCallback finishCallback
-, UnregisterCallback unregisterCallback) {
-	_event = LastRegisteredEvent++;
-
-	StartCallbacks.makeIfNull();
-	StartCallbacks->push_back({ that, startCallback });
-
-	FinishCallbacks.makeIfNull();
-	FinishCallbacks->push_back({ that, finishCallback });
-
-	UnregisterCallbacks[_event] = { that, unregisterCallback };
+void UnregisterObservable(ObservableCallHandlers *handlers) {
+	if (CantUseObservables) return;
+	PendingObservables().list.remove(handlers);
+	ActiveObservables().list.remove(handlers);
 }
 
 } // namespace internal
 
-// Observer base interface.
-Observer::~Observer() {
-	for_const (auto connection, _connections) {
-		unregisterObserver(connection);
+void HandleObservables() {
+	if (internal::CantUseObservables) return;
+	auto &active = internal::ActiveObservables().list;
+	qSwap(active, internal::PendingObservables().list);
+	while (!active.empty()) {
+		auto first = *active.begin();
+		(*first)();
+		if (!active.empty() && *active.begin() == first) {
+			active.erase(active.begin());
+		}
 	}
 }
 
-void Observer::observerRegistered(ConnectionId connection) {
-	_connections.push_back(connection);
-}
-
-void unregisterObserver(ConnectionId connection) {
-	auto event = static_cast<internal::ObservedEvent>(connection >> 24);
-	auto connectionIndex = int(connection & 0x00FFFFFFU) - 1;
-	auto &callback = internal::UnregisterCallbacks[event];
-	if (connectionIndex >= 0 && callback.call && callback.that) {
-		callback.call(callback.that, connectionIndex);
-	}
-}
-
-namespace internal {
-
-void observerRegisteredDefault(Observer *observer, ConnectionId connection) {
-	observer->observerRegistered(connection);
-}
-
-} // namespace internal
-} // namespace Notify
+} // namespace base

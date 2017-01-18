@@ -16,55 +16,58 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
+
+#include "ui/widgets/continuous_sliders.h"
 
 struct AudioPlaybackState;
 
 namespace Media {
 namespace Clip {
 
-class Playback : public TWidget {
-	Q_OBJECT
-
+class Playback {
 public:
-	Playback(QWidget *parent);
+	Playback(Ui::ContinuousSlider *slider);
 
-	void updateState(const AudioPlaybackState &playbackState, bool reset);
-	void setFadeOpacity(float64 opacity);
+	void updateState(const AudioPlaybackState &playbackState);
+	void updateLoadingState(float64 progress);
 
-signals:
-	void seekProgress(float64 progress);
-	void seekFinished(float64 progress);
-
-protected:
-	void paintEvent(QPaintEvent *e) override;
-	void mouseMoveEvent(QMouseEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void mouseReleaseEvent(QMouseEvent *e) override;
-	void enterEvent(QEvent *e) override;
-	void leaveEvent(QEvent *e) override;
+	void setFadeOpacity(float64 opacity) {
+		_slider->setFadeOpacity(opacity);
+	}
+	void setChangeProgressCallback(Ui::ContinuousSlider::Callback &&callback) {
+		_slider->setChangeProgressCallback(std_::move(callback));
+	}
+	void setChangeFinishedCallback(Ui::ContinuousSlider::Callback &&callback) {
+		_slider->setChangeFinishedCallback(std_::move(callback));
+	}
+	void setGeometry(int x, int y, int w, int h) {
+		_slider->setGeometry(x, y, w, h);
+	}
+	void hide() {
+		_slider->hide();
+	}
+	void show() {
+		_slider->show();
+	}
+	void moveToLeft(int x, int y) {
+		_slider->moveToLeft(x, y);
+	}
+	void resize(int w, int h) {
+		_slider->resize(w, h);
+	}
+	void setDisabled(bool disabled) {
+		_slider->setDisabled(disabled);
+	}
 
 private:
-	void step_progress(float64 ms, bool timer);
-	void updateCallback() {
-		update();
-	}
-	void setOver(bool over);
-
-	bool _over = false;
-	FloatAnimation _a_over;
+	Ui::ContinuousSlider *_slider;
 
 	int64 _position = 0;
-	int64 _duration = 0;
-	anim::fvalue a_progress = { 0., 0. };
-	Animation _a_progress;
+	TimeMs _duration = 0;
 
-	bool _mouseDown = false;
-	float64 _downProgress = 0.;
-
-	float64 _fadeOpacity = 1.;
 	bool _playing = false;
 
 };

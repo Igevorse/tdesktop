@@ -16,29 +16,40 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
 #include "window/section_widget.h"
+#include "ui/widgets/tooltip.h"
+#include "ui/widgets/scroll_area.h"
 
 namespace Overview {
 namespace Layout {
-
 class AbstractItem;
 class ItemBase;
 class Date;
-
 } // namespace Layout
 } // namespace Overview
 
+namespace Ui {
+class PlainShadow;
+class PopupMenu;
+class IconButton;
+class FlatInput;
+class CrossButton;
+} // namespace Ui
+
+namespace Notify {
+struct PeerUpdate;
+} // namespace Notify
+
 class OverviewWidget;
-class OverviewInner : public QWidget, public AbstractTooltipShower, public RPCSender {
+class OverviewInner : public TWidget, public Ui::AbstractTooltipShower, public RPCSender, private base::Subscriber {
 	Q_OBJECT
 
 public:
-
-	OverviewInner(OverviewWidget *overview, ScrollArea *scroll, PeerData *peer, MediaOverviewType type);
+	OverviewInner(OverviewWidget *overview, Ui::ScrollArea *scroll, PeerData *peer, MediaOverviewType type);
 
 	void activate();
 
@@ -47,17 +58,6 @@ public:
 
 	bool preloadLocal();
 	void preloadMore();
-
-	bool event(QEvent *e) override;
-	void touchEvent(QTouchEvent *e);
-	void paintEvent(QPaintEvent *e) override;
-	void mouseMoveEvent(QMouseEvent *e) override;
-	void mousePressEvent(QMouseEvent *e) override;
-	void mouseReleaseEvent(QMouseEvent *e) override;
-	void keyPressEvent(QKeyEvent *e) override;
-	void enterEvent(QEvent *e) override;
-	void leaveEvent(QEvent *e) override;
-	void resizeEvent(QResizeEvent *e) override;
 
 	void showContextMenu(QContextMenuEvent *e, bool showFromTouch = false);
 
@@ -82,7 +82,6 @@ public:
 	void mediaOverviewUpdated();
 	void changingMsgId(HistoryItem *row, MsgId newId);
 	void repaintItem(const HistoryItem *msg);
-	void itemRemoved(HistoryItem *item);
 
 	void getSelectionState(int32 &selectedForForward, int32 &selectedForDelete) const;
 	void clearSelectedItems(bool onlyTextSelection = false);
@@ -94,17 +93,26 @@ public:
 
 	~OverviewInner();
 
-public slots:
+protected:
+	bool event(QEvent *e) override;
+	void touchEvent(QTouchEvent *e);
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
+	void enterEvent(QEvent *e) override;
+	void leaveEvent(QEvent *e) override;
+	void resizeEvent(QResizeEvent *e) override;
 
+public slots:
 	void onUpdateSelected();
 
 	void copyContextUrl();
 	void cancelContextDownload();
 	void showContextInFolder();
-	void saveContextFile();
 
 	void goToMessage();
-	void deleteMessage();
 	void forwardMessage();
 	void selectMessage();
 
@@ -122,7 +130,10 @@ public slots:
 	void onNeedSearchMessages();
 
 private:
+	void saveDocumentToFile(DocumentData *document);
+	void invalidateCache();
 
+	void itemRemoved(HistoryItem *item);
 	MsgId complexMsgId(const HistoryItem *item) const;
 
 	bool itemMigrated(MsgId msgId) const;
@@ -150,8 +161,9 @@ private:
 	int32 countHeight();
 
 	OverviewWidget *_overview;
-	ScrollArea *_scroll;
-	int32 _resizeIndex, _resizeSkip;
+	Ui::ScrollArea *_scroll;
+	int _resizeIndex = -1;
+	int _resizeSkip = 0;
 
 	PeerData *_peer;
 	MediaOverviewType _type;
@@ -159,10 +171,11 @@ private:
 	History *_migrated, *_history;
 	ChannelId _channel;
 
-	bool _selMode;
+	bool _selMode = false;
 	TextSelection itemSelectedValue(int32 index) const;
 
-	int32 _rowsLeft, _rowWidth;
+	int _rowsLeft = 0;
+	int _rowWidth = 0;
 
 	typedef QVector<Overview::Layout::AbstractItem*> Items;
 	Items _items;
@@ -174,21 +187,24 @@ private:
 	Overview::Layout::AbstractItem *layoutPrepare(const QDate &date, bool month);
 	int32 setLayoutItem(int32 index, Overview::Layout::AbstractItem *item, int32 top);
 
-	FlatInput _search;
-	IconedButton _cancelSearch;
+	object_ptr<Ui::FlatInput> _search;
+	object_ptr<Ui::CrossButton> _cancelSearch;
 	QVector<MsgId> _results;
 	int32 _itemsToBeLoaded;
 
 	// photos
-	int32 _photosInRow;
+	int32 _photosInRow = 1;
 
 	QTimer _searchTimer;
 	QString _searchQuery;
-	bool _inSearch, _searchFull, _searchFullMigrated;
-	mtpRequestId _searchRequest;
+	bool _inSearch = false;
+	bool _searchFull = false;
+	bool _searchFullMigrated = false;
+	mtpRequestId _searchRequest = 0;
 	History::MediaOverview _searchResults;
-	MsgId _lastSearchId, _lastSearchMigratedId;
-	int32 _searchedCount;
+	MsgId _lastSearchId = 0;
+	MsgId _lastSearchMigratedId = 0;
+	int _searchedCount = 0;
 	enum SearchRequestType {
 		SearchFromStart,
 		SearchFromOffset,
@@ -204,13 +220,17 @@ private:
 	typedef QMap<mtpRequestId, QString> SearchQueries;
 	SearchQueries _searchQueries;
 
-	int32 _width, _height, _minHeight, _marginTop, _marginBottom;
+	int _width = 0;
+	int _height = 0;
+	int _minHeight = 0;
+	int _marginTop = 0;
+	int _marginBottom = 0;
 
 	QTimer _linkTipTimer;
 
 	// selection support, like in HistoryWidget
-	Qt::CursorShape _cursor;
-	HistoryCursorState _cursorState;
+	style::cursor _cursor = style::cur_default;
+	HistoryCursorState _cursorState = HistoryDefaultCursorState;
 	using SelectedItems = QMap<MsgId, TextSelection>;
 	SelectedItems _selected;
 	enum DragAction {
@@ -220,51 +240,54 @@ private:
 		PrepareSelect = 0x03,
 		Selecting = 0x04,
 	};
-	DragAction _dragAction;
+	DragAction _dragAction = NoDrag;
 	QPoint _dragStartPos, _dragPos;
-	MsgId _dragItem, _selectedMsgId;
-	int32 _dragItemIndex;
-	MsgId _mousedItem;
-	int32 _mousedItemIndex;
+	MsgId _dragItem = 0;
+	MsgId _selectedMsgId = 0;
+	int _dragItemIndex = -1;
+	MsgId _mousedItem = 0;
+	int _mousedItemIndex = -1;
 	uint16 _dragSymbol;
-	bool _dragWasInactive;
+	bool _dragWasInactive = false;
 
 	ClickHandlerPtr _contextMenuLnk;
 
-	MsgId _dragSelFrom, _dragSelTo;
-	int32 _dragSelFromIndex, _dragSelToIndex;
-	bool _dragSelecting;
+	MsgId _dragSelFrom = 0;
+	MsgId _dragSelTo = 0;
+	int _dragSelFromIndex = -1;
+	int _dragSelToIndex = -1;
+	bool _dragSelecting = false;
 
-	bool _touchScroll, _touchSelect, _touchInProgress;
+	bool _touchScroll = false;
+	bool _touchSelect = false;
+	bool _touchInProgress = false;
 	QPoint _touchStart, _touchPrevPos, _touchPos;
 	QTimer _touchSelectTimer;
 
-	TouchScrollState _touchScrollState;
-	bool _touchPrevPosValid, _touchWaitingAcceleration;
+	Ui::TouchScrollState _touchScrollState = Ui::TouchScrollState::Manual;
+	bool _touchPrevPosValid = false;
+	bool _touchWaitingAcceleration = false;
 	QPoint _touchSpeed;
-	uint64 _touchSpeedTime, _touchAccelerationTime, _touchTime;
+	TimeMs _touchSpeedTime = 0;
+	TimeMs _touchAccelerationTime = 0;
+	TimeMs _touchTime = 0;
 	QTimer _touchScrollTimer;
 
-	PopupMenu *_menu;
+	Ui::PopupMenu *_menu = nullptr;
 };
 
 class OverviewWidget : public TWidget, public RPCSender {
 	Q_OBJECT
 
 public:
-
 	OverviewWidget(QWidget *parent, PeerData *peer, MediaOverviewType type);
 
 	void clear();
 
-	void resizeEvent(QResizeEvent *e) override;
-	void paintEvent(QPaintEvent *e) override;
-	void contextMenuEvent(QContextMenuEvent *e) override;
-
 	void scrollBy(int32 add);
 	void scrollReset();
 
-	void paintTopBar(Painter &p, float64 over, int32 decreaseWidth);
+	bool paintTopBar(Painter &p, int decreaseWidth);
 	void topBarClick();
 
 	PeerData *peer() const;
@@ -283,11 +306,10 @@ public:
 	}
 	void setLastScrollTop(int lastScrollTop);
 	void showAnimated(Window::SlideDirection direction, const Window::SectionSlideParams &params);
-	void step_show(float64 ms, bool timer);
 
 	void doneShow();
 
-	void mediaOverviewUpdated(PeerData *peer, MediaOverviewType type);
+	void mediaOverviewUpdated(const Notify::PeerUpdate &update);
 	void changingMsgId(HistoryItem *row, MsgId newId);
 	void itemRemoved(HistoryItem *item);
 
@@ -300,27 +322,23 @@ public:
 
 	void fillSelectedItems(SelectedItemSet &sel, bool forDelete);
 
-	void updateScrollColors();
-
 	void updateAfterDrag();
 
 	void grabStart() override {
 		_inGrab = true;
 		resizeEvent(0);
 	}
-	void grapWithoutTopBarShadow() {
-		grabStart();
-		_topShadow.hide();
-	}
-	void grabFinish() override {
-		_inGrab = false;
-		resizeEvent(0);
-		_topShadow.show();
-	}
+	void grapWithoutTopBarShadow();
+	void grabFinish() override;
 	void rpcClear() override {
-		_inner.rpcClear();
+		_inner->rpcClear();
 		RPCSender::rpcClear();
 	}
+
+	void confirmDeleteContextItem();
+	void confirmDeleteSelectedItems();
+	void deleteContextItem(bool forEveryone);
+	void deleteSelectedItems(bool forEveryone);
 
 	void ui_repaintHistoryItem(const HistoryItem *item);
 
@@ -328,42 +346,42 @@ public:
 
 	~OverviewWidget();
 
-public slots:
+protected:
+	void resizeEvent(QResizeEvent *e) override;
+	void paintEvent(QPaintEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
 
+public slots:
 	void activate();
 	void onScroll();
 
 	void onScrollTimer();
-	void onPlayerSongChanged(const FullMsgId &msgId);
 
 	void onForwardSelected();
-	void onDeleteSelected();
-	void onDeleteSelectedSure();
-	void onDeleteContextSure();
 	void onClearSelected();
 
 private:
+	void animationCallback();
 
-	ScrollArea _scroll;
-	OverviewInner _inner;
-	bool _noDropResizeIndex;
+	object_ptr<Ui::ScrollArea> _scroll;
+	QPointer<OverviewInner> _inner;
+	bool _noDropResizeIndex = false;
 
 	QString _header;
 
 	Animation _a_show;
+	Window::SlideDirection _showDirection;
 	QPixmap _cacheUnder, _cacheOver;
-	anim::ivalue a_coordUnder, a_coordOver;
-	anim::fvalue a_progress;
 
-	int32 _scrollSetAfterShow;
+	int32 _scrollSetAfterShow = 0;
 
 	QTimer _scrollTimer;
-	int32 _scrollDelta;
+	int32 _scrollDelta = 0;
 
-	int32 _selCount;
+	int32 _selCount = 0;
 
-	PlainShadow _topShadow;
-	bool _inGrab;
+	object_ptr<Ui::PlainShadow> _topShadow;
+	bool _inGrab = false;
 
 };
 

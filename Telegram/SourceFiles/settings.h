@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -91,19 +91,7 @@ inline const QString &cDialogHelperPathFinal() {
 }
 DeclareSetting(bool, CtrlEnter);
 
-typedef QPixmap *QPixmapPointer;
-DeclareSetting(QPixmapPointer, ChatBackground);
-DeclareSetting(int32, ChatBackgroundId);
-DeclareSetting(QPixmapPointer, ChatDogImage);
-DeclareSetting(bool, TileBackground);
-
-DeclareSetting(bool, SoundNotify);
-DeclareSetting(bool, IncludeMuted);
-DeclareSetting(bool, DesktopNotify);
-DeclareSetting(DBINotifyView, NotifyView);
 DeclareSetting(bool, AutoUpdate);
-
-DeclareSetting(bool, WindowsNotifications);
 
 struct TWindowPos {
 	TWindowPos() : moncrc(0), maximized(0), x(0), y(0), w(0), h(0) {
@@ -114,10 +102,6 @@ struct TWindowPos {
 DeclareSetting(TWindowPos, WindowPos);
 DeclareSetting(bool, SupportTray);
 DeclareSetting(DBIWorkMode, WorkMode);
-DeclareSetting(DBIConnectionType, ConnectionType);
-DeclareSetting(bool, TryIPv6);
-DeclareSetting(DBIDefaultAttach, DefaultAttach);
-DeclareSetting(ConnectionProxy, ConnectionProxy);
 DeclareSetting(bool, SeenTrayTooltip);
 DeclareSetting(bool, RestartingUpdate);
 DeclareSetting(bool, Restarting);
@@ -128,18 +112,13 @@ DeclareSetting(bool, NoStartUpdate);
 DeclareSetting(bool, StartToSettings);
 DeclareSetting(bool, ReplaceEmojis);
 DeclareReadSetting(bool, ManyInstance);
-DeclareSetting(bool, AskDownloadPath);
-DeclareSetting(QString, DownloadPath);
-DeclareSetting(QByteArray, DownloadPathBookmark);
+
 DeclareSetting(QByteArray, LocalSalt);
 DeclareSetting(DBIScale, RealScale);
 DeclareSetting(DBIScale, ScreenScale);
 DeclareSetting(DBIScale, ConfigScale);
 DeclareSetting(bool, CompressPastedImage);
 DeclareSetting(QString, TimeFormat);
-
-DeclareSetting(int32, AutoLock);
-DeclareSetting(bool, HasPasscode);
 
 DeclareSetting(bool, HasAudioPlayer);
 DeclareSetting(bool, HasAudioCapture);
@@ -204,7 +183,7 @@ typedef QMap<EmojiPtr, StickerPack> StickersByEmojiMap;
 
 typedef QVector<DocumentData*> SavedGifs;
 DeclareRefSetting(SavedGifs, SavedGifs);
-DeclareSetting(uint64, LastSavedGifsUpdate);
+DeclareSetting(TimeMs, LastSavedGifsUpdate);
 DeclareSetting(bool, ShowingSavedGifs);
 
 typedef QList<QPair<QString, ushort> > RecentHashtagPack;
@@ -218,11 +197,11 @@ DeclareRefSetting(RecentInlineBots, RecentInlineBots);
 DeclareSetting(bool, PasswordRecovered);
 
 DeclareSetting(int32, PasscodeBadTries);
-DeclareSetting(uint64, PasscodeLastTry);
+DeclareSetting(TimeMs, PasscodeLastTry);
 
 inline bool passcodeCanTry() {
 	if (cPasscodeBadTries() < 3) return true;
-	uint64 dt = getms(true) - cPasscodeLastTry();
+	auto dt = getms(true) - cPasscodeLastTry();
 	switch (cPasscodeBadTries()) {
 	case 3: return dt >= 5000;
 	case 4: return dt >= 10000;
@@ -279,7 +258,6 @@ DeclareSetting(QString, LangErrors);
 DeclareSetting(bool, Retina);
 DeclareSetting(float64, RetinaFactor);
 DeclareSetting(int32, IntRetinaFactor);
-DeclareSetting(bool, CustomNotifies);
 
 DeclareReadSetting(DBIPlatform, Platform);
 DeclareReadSetting(QString, PlatformString);

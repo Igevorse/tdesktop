@@ -1,11 +1,13 @@
 Building via qmake
 ==================
 
+**NB** These are outdated, please refer to [Building using GYP/CMake][cmake] instructions.
+
 The following commands assume the following environment variables are set:
 
  * `$srcdir`: The directory into which the source has been downloaded and
    unpacked.
- * `_qtver`: The Qt version being used (eg: `5.6.0`).
+ * `_qtver`: The Qt version being used (eg: `5.6.2`).
  * `$pkgdir`: The directory into which installable files are places. This is
    `/` for local installations, or can be different directory when preparing a
    redistributable package.
@@ -63,7 +65,7 @@ Building
 
 
     # Build patched Qt
-    cd "$srcdir/Libraries/QtStatic"
+    cd "$qtdir"
     ./configure -prefix "$srcdir/qt" -release -opensource -confirm-license -qt-zlib \
                 -qt-libpng -qt-libjpeg -qt-freetype -qt-harfbuzz -qt-pcre -qt-xcb \
                 -qt-xkbcommon-x11 -no-opengl -no-gtkstyle -static -nomake examples -nomake tests
@@ -133,3 +135,4 @@ In case these instructions are at some point out of date, the above may serve
 as an update reference.
 
 [arch-package]: https://aur.archlinux.org/packages/telegram-desktop/
+[cmake]: building-cmake.md

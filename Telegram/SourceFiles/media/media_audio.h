@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -51,11 +51,11 @@ struct VideoSoundPart;
 struct AudioPlaybackState {
 	AudioPlayerState state = AudioPlayerStopped;
 	int64 position = 0;
-	int64 duration = 0;
+	TimeMs duration = 0;
 	int32 frequency = 0;
 };
 
-class AudioPlayer : public QObject {
+class AudioPlayer : public QObject, public base::Observable<AudioMsgId>, private base::Subscriber {
 	Q_OBJECT
 
 public:
@@ -69,8 +69,7 @@ public:
 	// Video player audio stream interface.
 	void initFromVideo(uint64 videoPlayId, std_::unique_ptr<VideoSoundData> &&data, int64 position);
 	void feedFromVideo(VideoSoundPart &&part);
-	int64 getVideoCorrectedTime(uint64 playId, int64 frameMs, uint64 systemMs);
-	void videoSoundProgress(const AudioMsgId &audio);
+	int64 getVideoCorrectedTime(uint64 playId, TimeMs frameMs, TimeMs systemMs);
 	AudioPlaybackState currentVideoState(uint64 videoPlayId);
 	void stopFromVideo(uint64 videoPlayId);
 	void pauseFromVideo(uint64 videoPlayId);
@@ -86,9 +85,11 @@ public:
 
 	~AudioPlayer();
 
-public slots:
+private slots:
 	void onError(const AudioMsgId &audio);
 	void onStopped(const AudioMsgId &audio);
+
+	void onUpdated(const AudioMsgId &audio);
 
 signals:
 	void updated(const AudioMsgId &audio);
@@ -102,13 +103,12 @@ signals:
 	void unsuppressSong();
 	void suppressAll();
 
-	void songVolumeChanged();
-	void videoVolumeChanged();
-
 private:
 	bool fadedStop(AudioMsgId::Type type, bool *fadedStart = 0);
 	bool updateCurrentStarted(AudioMsgId::Type type, int32 pos = -1);
 	bool checkCurrentALError(AudioMsgId::Type type);
+
+	void videoSoundProgress(const AudioMsgId &audio);
 
 	struct AudioMsg {
 		void clear();
@@ -147,16 +147,16 @@ private:
 	int *currentIndex(AudioMsgId::Type type);
 	const int *currentIndex(AudioMsgId::Type type) const;
 
-	int _audioCurrent;
+	int _audioCurrent = 0;
 	AudioMsg _audioData[AudioSimultaneousLimit];
 
-	int _songCurrent;
+	int _songCurrent = 0;
 	AudioMsg _songData[AudioSimultaneousLimit];
 
 	AudioMsg _videoData;
 	uint64 _lastVideoPlayId = 0;
-	uint64 _lastVideoPlaybackWhen = 0;
-	uint64 _lastVideoPlaybackCorrectedMs = 0;
+	TimeMs _lastVideoPlaybackWhen = 0;
+	TimeMs _lastVideoPlaybackCorrectedMs = 0;
 	QMutex _lastVideoMutex;
 
 	QMutex _mutex;
@@ -185,27 +185,21 @@ class AudioCapture : public QObject {
 	Q_OBJECT
 
 public:
-
 	AudioCapture();
-
-	void start();
-	void stop(bool needResult);
 
 	bool check();
 
 	~AudioCapture();
 
 signals:
+	void start();
+	void stop(bool needResult);
 
-	void captureOnStart();
-	void captureOnStop(bool needResult);
-
-	void onDone(QByteArray data, VoiceWaveform waveform, qint32 samples);
-	void onUpdate(quint16 level, qint32 samples);
-	void onError();
+	void done(QByteArray data, VoiceWaveform waveform, qint32 samples);
+	void updated(quint16 level, qint32 samples);
+	void error();
 
 private:
-
 	friend class AudioCaptureInner;
 
 	QThread _captureThread;
@@ -255,11 +249,17 @@ private:
 
 	QTimer _timer, _pauseTimer;
 	QMutex _pauseMutex;
-	bool _pauseFlag, _paused;
+	bool _pauseFlag = false;
+	bool _paused = true;
 
-	bool _suppressAll, _suppressAllAnim, _suppressSong, _suppressSongAnim, _songVolumeChanged, _videoVolumeChanged;
-	anim::fvalue _suppressAllGain, _suppressSongGain;
-	uint64 _suppressAllStart, _suppressSongStart;
+	bool _suppressAll = false;
+	bool _suppressAllAnim = false;
+	bool _suppressSong = false;
+	bool _suppressSongAnim = false;
+	bool _songVolumeChanged, _videoVolumeChanged;
+	anim::value _suppressAllGain, _suppressSongGain;
+	TimeMs _suppressAllStart = 0;
+	TimeMs _suppressSongStart = 0;
 
 };
 
@@ -270,18 +270,15 @@ class AudioCaptureInner : public QObject {
 	Q_OBJECT
 
 public:
-
 	AudioCaptureInner(QThread *thread);
 	~AudioCaptureInner();
 
 signals:
-
 	void error();
-	void update(quint16 level, qint32 samples);
+	void updated(quint16 level, qint32 samples);
 	void done(QByteArray data, VoiceWaveform waveform, qint32 samples);
 
-	public slots:
-
+public slots:
 	void onInit();
 	void onStart();
 	void onStop(bool needResult);
@@ -289,7 +286,6 @@ signals:
 	void onTimeout();
 
 private:
-
 	void processFrame(int32 offset, int32 framesize);
 
 	void writeFrame(AVFrame *frame);

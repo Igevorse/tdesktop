@@ -1,4 +1,4 @@
-##Build instructions for Xcode 7.2.1
+##Build instructions for Xcode 8.0
 
 ###Prepare folder
 
@@ -13,12 +13,6 @@ There you will have two folders, **Libraries** for third-party libs and **tdeskt
 By git – in Terminal go to **/Users/user/TBuild** and run:
 
     git clone https://github.com/telegramdesktop/tdesktop.git
-
-or:
-* download in ZIP and extract to **/Users/user/TBuild**
-* rename **tdesktop-master** to **tdesktop**.
-
-The path to Telegram.xcodeproj should now be: **/Users/user/TBuild/tdesktop/Telegram/Telegram.xcodeproj**
 
 ###Prepare libraries
 
@@ -52,11 +46,6 @@ From https://github.com/telegramdesktop/openssl-xcode with git in Terminal:
 * run:
 
 	git clone https://github.com/telegramdesktop/openssl-xcode.git
-
-or:
-
-* download in ZIP and extract to **/Users/user/TBuild/Libraries**,
-* rename **openssl-xcode-master** to **openssl-xcode**
 
 The path to openssl.xcodeproj should now be: **/Users/user/TBuild/Libraries/openssl-xcode/openssl.xcodeproj**
 
@@ -99,12 +88,6 @@ From https://github.com/telegramdesktop/libexif-0.6.20 with git in Terminal:
 *  run:
 
     	git clone https://github.com/telegramdesktop/libexif-0.6.20.git
-
-or:
-
-* download in ZIP
-* extract to **/Users/user/TBuild/Libraries**
-* rename **libexif-0.6.20-master** to **libexif-0.6.20**
 
 The folder configure should have this path:
 **/Users/user/TBuild/Libraries/libexif-0.6.20/configure**
@@ -164,7 +147,7 @@ In Terminal go to **/Users/user/TBuild/Libraries** and run:
 
     git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
     cd ffmpeg
-    git checkout release/2.8
+    git checkout release/3.2
 
 * Download [libiconv-1.14](http://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.14.tar.gz) from http://www.gnu.org/software/libiconv/#downloading
 * Extract to **/Users/user/TBuild/Libraries** to have **/Users/user/TBuild/Libraries/ibiconv-1.14**
@@ -192,30 +175,30 @@ Then in Terminal go to **/Users/user/TBuild/Libraries/ffmpeg** and run:
     make
     sudo make install
 
-####Qt 5.6.0, slightly patched
+####Qt 5.6.2, slightly patched
 #####Get the source code
 
 In Terminal go to **/Users/user/TBuild/Libraries** and run:
 
-    git clone git://code.qt.io/qt/qt5.git qt5_6_0
-    cd qt5_6_0
+    git clone git://code.qt.io/qt/qt5.git qt5_6_2
+    cd qt5_6_2
     git checkout 5.6
     perl init-repository --module-subset=qtbase,qtimageformats
-    git checkout v5.6.0
-    cd qtimageformats && git checkout v5.6.0 && cd ..
-    cd qtbase && git checkout v5.6.0 && cd ..
+    git checkout v5.6.2
+    cd qtimageformats && git checkout v5.6.2 && cd ..
+    cd qtbase && git checkout v5.6.2 && cd ..
 
 #####Apply the patch
 
-From **/Users/user/TBuild/Libraries/qt5_6_0/qtbase**, run:
+From **/Users/user/TBuild/Libraries/qt5_6_2/qtbase**, run:
 
-    git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_0.diff
+    git apply ../../../tdesktop/Telegram/Patches/qtbase_5_6_2.diff
 
 #####Building library
 
-Go to **/Users/user/TBuild/Libraries/qt5_6_0** and run:
+Go to **/Users/user/TBuild/Libraries/qt5_6_2** and run:
 
-    ./configure -prefix "/usr/local/tdesktop/Qt-5.6.0" -debug-and-release -force-debug-info -opensource -confirm-license -static -opengl desktop -no-openssl -securetransport -nomake examples -nomake tests -platform macx-clang
+    ./configure -prefix "/usr/local/tdesktop/Qt-5.6.2" -debug-and-release -force-debug-info -opensource -confirm-license -static -opengl desktop -no-openssl -securetransport -nomake examples -nomake tests -platform macx-clang
     make -j4
     sudo make install
 
@@ -248,11 +231,17 @@ In Terminal go to **/Users/user/TBuild/Libraries** and run:
     build/gyp_crashpad.py -Dmac_deployment_target=10.8
     ninja -C out/Release
 
+####Prepare GYP
+
+In Terminal go to **/Users/user/TBuild/Libraries** and run
+
+    cd gyp
+    git apply ../../tdesktop/Telegram/Patches/gyp.diff
+
 ###Building Telegram Desktop
 
-* Launch Xcode, all projects will be taken from **/Users/user/TBuild/tdesktop/Telegram**
-* Open MetaEmoji.xcodeproj and build for Debug (Release optionally)
-* Open MetaLang.xcodeproj and build for Debug (Release optionally)
-* Open Telegram.xcodeproj and build for Debug
-* Build Updater target as well, it is required for Telegram relaunch
-* Release Telegram build will require removing **CUSTOM_API_ID** definition in Telegram target settings (Apple LLVM 6.1 - Custom Compiler Flags > Other C / C++ Flags > Release)
+In Terminal go to **/home/user/TBuild/tdesktop/Telegram** and run
+
+    gyp/refresh.sh
+
+Then launch Xcode, open **/Users/user/TBuild/tdesktop/Telegram.xcodeproj** and build for Debug / Release.

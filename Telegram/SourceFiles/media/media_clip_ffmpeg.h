@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #pragma once
 
@@ -37,14 +37,14 @@ class FFMpegReaderImplementation : public ReaderImplementation {
 public:
 	FFMpegReaderImplementation(FileLocation *location, QByteArray *data, uint64 playId);
 
-	ReadResult readFramesTill(int64 frameMs, uint64 systemMs) override;
+	ReadResult readFramesTill(TimeMs frameMs, TimeMs systemMs) override;
 
-	int64 frameRealTime() const override;
-	uint64 framePresentationTime() const override;
+	TimeMs frameRealTime() const override;
+	TimeMs framePresentationTime() const override;
 
 	bool renderFrame(QImage &to, bool &hasAlpha, const QSize &size) override;
 
-	int64 durationMs() const override;
+	TimeMs durationMs() const override;
 	bool hasAudio() const override {
 		return (_audioStreamId >= 0);
 	}
@@ -68,8 +68,19 @@ private:
 	};
 	PacketResult readPacket(AVPacket *packet);
 	void processPacket(AVPacket *packet);
-	int64 countPacketMs(AVPacket *packet) const;
+	TimeMs countPacketMs(AVPacket *packet) const;
 	PacketResult readAndProcessPacket();
+
+	enum class Rotation {
+		None,
+		Degrees90,
+		Degrees180,
+		Degrees270,
+	};
+	Rotation rotationFromDegrees(int degrees) const;
+	bool rotationSwapWidthHeight() const {
+		return (_rotation == Rotation::Degrees90) || (_rotation == Rotation::Degrees270);
+	}
 
 	void startPacket();
 	void finishPacket();
@@ -79,6 +90,8 @@ private:
 	static int64_t _seek(void *opaque, int64_t offset, int whence);
 
 	Mode _mode = Mode::Normal;
+
+	Rotation _rotation = Rotation::None;
 
 	uchar *_ioBuffer = nullptr;
 	AVIOContext *_ioContext = nullptr;
@@ -90,11 +103,12 @@ private:
 	bool _opened = false;
 	bool _hadFrame = false;
 	bool _frameRead = false;
+	int _skippedInvalidDataPackets = 0;
 
-	int _audioStreamId = 0;
+	int _audioStreamId = -1;
 	uint64 _playId = 0;
-	int64 _lastReadVideoMs = 0;
-	int64 _lastReadAudioMs = 0;
+	TimeMs _lastReadVideoMs = 0;
+	TimeMs _lastReadAudioMs = 0;
 
 	QQueue<FFMpeg::AVPacketDataWrap> _packetQueue;
 	AVPacket _packetNull; // for final decoding
@@ -107,12 +121,12 @@ private:
 	SwsContext *_swsContext = nullptr;
 	QSize _swsSize;
 
-	int64 _frameMs = 0;
+	TimeMs _frameMs = 0;
 	int _nextFrameDelay = 0;
 	int _currentFrameDelay = 0;
 
-	int64 _frameTime = 0;
-	int64 _frameTimeCorrection = 0;
+	TimeMs _frameTime = 0;
+	TimeMs _frameTimeCorrection = 0;
 
 };
 

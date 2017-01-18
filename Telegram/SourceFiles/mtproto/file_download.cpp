@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 
@@ -61,23 +61,14 @@ namespace {
 }
 
 FileLoader::FileLoader(const QString &toFile, int32 size, LocationType locationType, LoadToCacheSetting toCache, LoadFromCloudSetting fromCloud, bool autoLoading)
-: _prev(0)
-, _next(0)
-, _priority(0)
-, _paused(false)
-, _autoLoading(autoLoading)
-, _inQueue(false)
-, _complete(false)
-, _localStatus(LocalNotTried)
+: _autoLoading(autoLoading)
 , _file(toFile)
 , _fname(toFile)
-, _fileIsOpen(false)
 , _toCache(toCache)
 , _fromCloud(fromCloud)
 , _size(size)
 , _type(mtpc_storage_fileUnknown)
-, _locationType(locationType)
-, _localTaskId(0) {
+, _locationType(locationType) {
 }
 
 QByteArray FileLoader::imageFormat(const QSize &shrinkBox) const {
@@ -114,9 +105,9 @@ void FileLoader::readImage(const QSize &shrinkBox) const {
 }
 
 float64 FileLoader::currentProgress() const {
-	if (_complete) return 1;
-	if (!fullSize()) return 0;
-	return float64(currentOffset()) / fullSize();
+	if (_complete) return 1.;
+	if (!fullSize()) return 0.;
+	return snap(float64(currentOffset()) / fullSize(), 0., 1.);
 }
 
 int32 FileLoader::fullSize() const {
@@ -124,7 +115,9 @@ int32 FileLoader::fullSize() const {
 }
 
 bool FileLoader::setFileName(const QString &fileName) {
-	if (_toCache != LoadToCacheAsWell || !_fname.isEmpty()) return fileName.isEmpty();
+	if (_toCache != LoadToCacheAsWell || !_fname.isEmpty()) {
+		return fileName.isEmpty() || (fileName == _fname);
+	}
 	_fname = fileName;
 	_file.setFileName(_fname);
 	return true;
@@ -207,9 +200,8 @@ void FileLoader::localLoaded(const StorageImageSaved &result, const QByteArray &
 		_fileIsOpen = false;
 		psPostprocessFile(QFileInfo(_file).absoluteFilePath());
 	}
-	emit App::wnd()->imageLoaded();
 	emit progress(this);
-	FileDownload::internal::notifyImageLoaded();
+	FileDownload::ImageLoaded().notify();
 	loadNext();
 }
 
@@ -430,7 +422,7 @@ bool mtpFileLoader::loadPart() {
 
 	App::app()->killDownloadSessionsStop(_dc);
 
-	mtpRequestId reqId = MTP::send(MTPupload_GetFile(MTPupload_getFile(loc, MTP_int(offset), MTP_int(limit))), rpcDone(&mtpFileLoader::partLoaded, offset), rpcFail(&mtpFileLoader::partFailed), MTP::dldDcId(_dc, dcIndex), 50);
+	mtpRequestId reqId = MTP::send(MTPupload_GetFile(loc, MTP_int(offset), MTP_int(limit)), rpcDone(&mtpFileLoader::partLoaded, offset), rpcFail(&mtpFileLoader::partFailed), MTP::dldDcId(_dc, dcIndex), 50);
 
 	++_queue->queries;
 	dr.v[dcIndex] += limit;
@@ -460,8 +452,8 @@ void mtpFileLoader::partLoaded(int32 offset, const MTPupload_File &result, mtpRe
 	--_queue->queries;
 	_requests.erase(i);
 
-	const auto &d(result.c_upload_file());
-	const string &bytes(d.vbytes.c_string().v);
+	auto &d = result.c_upload_file();
+	auto &bytes = d.vbytes.c_string().v;
 
 	if (DebugLogging::FileLoader() && _id) DEBUG_LOG(("FileLoader(%1): got part with offset=%2, bytes=%3, _queue->queries=%4, _nextRequestOffset=%5, _requests=%6").arg(_id).arg(offset).arg(bytes.size()).arg(_queue->queries).arg(_nextRequestOffset).arg(serializereqs(_requests)));
 
@@ -516,8 +508,6 @@ void mtpFileLoader::partLoaded(int32 offset, const MTPupload_File &result, mtpRe
 		}
 		removeFromQueue();
 
-		emit App::wnd()->imageLoaded();
-
 		if (!_queue->queries) {
 			App::app()->killDownloadSessionsStart(_dc);
 		}
@@ -544,7 +534,7 @@ void mtpFileLoader::partLoaded(int32 offset, const MTPupload_File &result, mtpRe
 	}
 	emit progress(this);
 	if (_complete) {
-		FileDownload::internal::notifyImageLoaded();
+		FileDownload::ImageLoaded().notify();
 	}
 	loadNext();
 }
@@ -594,6 +584,7 @@ bool mtpFileLoader::tryLoadLocal() {
 			}
 		}
 	}
+	emit progress(this);
 
 	if (_localStatus != LocalNotTried) {
 		return _complete;
@@ -669,13 +660,11 @@ void webFileLoader::onFinished(const QByteArray &data) {
 	}
 	removeFromQueue();
 
-	emit App::wnd()->imageLoaded();
-
 	if (_localStatus == LocalNotFound || _localStatus == LocalFailed) {
 		Local::writeWebFile(_url, _data);
 	}
 	emit progress(this);
-	FileDownload::internal::notifyImageLoaded();
+	FileDownload::ImageLoaded().notify();
 	loadNext();
 }
 
@@ -780,7 +769,7 @@ void reinitWebLoadManager() {
 	if (webLoadManager()) {
 		webLoadManager()->setProxySettings(App::getHttpProxySettings());
 	}
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 }
 
 void stopWebLoadManager() {
@@ -803,7 +792,7 @@ void WebLoadManager::setProxySettings(const QNetworkProxy &proxy) {
 	_proxySettings = proxy;
 	emit proxyApplyDelayed();
 }
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 
 WebLoadManager::WebLoadManager(QThread *thread) {
 	moveToThread(thread);
@@ -818,7 +807,9 @@ WebLoadManager::WebLoadManager(QThread *thread) {
 	connect(this, SIGNAL(error(webFileLoader*)), _webLoadMainManager, SLOT(error(webFileLoader*)));
 
 	connect(&_manager, SIGNAL(authenticationRequired(QNetworkReply*,QAuthenticator*)), this, SLOT(onFailed(QNetworkReply*)));
+#ifndef OS_MAC_OLD
 	connect(&_manager, SIGNAL(sslErrors(QNetworkReply*,const QList<QSslError>&)), this, SLOT(onFailed(QNetworkReply*)));
+#endif // OS_MAC_OLD
 }
 
 void WebLoadManager::append(webFileLoader *loader, const QString &url) {
@@ -1033,7 +1024,7 @@ void WebLoadManager::proxyApply() {
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	QMutexLocker lock(&_loaderPointersMutex);
 	_manager.setProxy(_proxySettings);
-#endif
+#endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 }
 
 void WebLoadManager::finish() {
@@ -1091,21 +1082,12 @@ namespace MTP {
 namespace FileDownload {
 namespace {
 
-using internal::ImageLoadedHandler;
-
-Notify::SimpleObservedEventRegistrator<ImageLoadedHandler> creator(nullptr, nullptr);
+base::Observable<void> ImageLoadedObservable;
 
 } // namespace
 
-namespace internal {
-
-Notify::ConnectionId plainRegisterImageLoadedObserver(ImageLoadedHandler &&handler) {
-	return creator.registerObserver(std_::forward<ImageLoadedHandler>(handler));
+base::Observable<void> &ImageLoaded() {
+	return ImageLoadedObservable;
 }
 
-void notifyImageLoaded() {
-	creator.notify();
-}
-
-} // namespace internal
-}
+} // namespace FileDownload

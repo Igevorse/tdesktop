@@ -16,7 +16,7 @@ In addition, as a special exception, the copyright holders give permission
 to link the code of portions of this program with the OpenSSL library.
 
 Full license: https://github.com/telegramdesktop/tdesktop/blob/master/LICENSE
-Copyright (c) 2014-2016 John Preston, https://desktop.telegram.org
+Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 */
 #include "stdafx.h"
 #include "window/section_widget.h"
@@ -50,8 +50,8 @@ void SectionWidget::showAnimated(SlideDirection direction, const SectionSlidePar
 
 	_showAnimation = std_::make_unique<SlideAnimation>();
 	_showAnimation->setDirection(direction);
-	_showAnimation->setRepaintCallback(func(this, &SectionWidget::repaintCallback));
-	_showAnimation->setFinishedCallback(func(this, &SectionWidget::showFinished));
+	_showAnimation->setRepaintCallback([this] { update(); });
+	_showAnimation->setFinishedCallback([this] { showFinished(); });
 	_showAnimation->setPixmaps(params.oldContentCache, myContentCache);
 	_showAnimation->setTopBarShadow(params.withTopBarShadow);
 	_showAnimation->start();
@@ -71,8 +71,6 @@ void SectionWidget::paintEvent(QPaintEvent *e) {
 void SectionWidget::showFinished() {
 	_showAnimation.reset();
 	if (isHidden()) return;
-
-	App::app()->mtpUnpause();
 
 	showChildren();
 	showFinishedHook();
